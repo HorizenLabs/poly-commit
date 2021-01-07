@@ -1,4 +1,3 @@
-#![cfg_attr(not(feature = "std"), no_std)]
 //! A crate for polynomial commitment schemes.
 #![deny(unused_import_braces, unused_qualifications, trivial_casts)]
 #![deny(trivial_numeric_casts, private_in_public, variant_size_differences)]
@@ -15,12 +14,12 @@ extern crate derivative;
 #[macro_use]
 extern crate bench_utils;
 
-use ark_ff::Field;
-pub use ark_poly::DensePolynomial as Polynomial;
-use core::iter::FromIterator;
+use algebra::Field;
+pub use algebra_utils::fft::DensePolynomial as Polynomial;
+use std::iter::FromIterator;
 use rand_core::RngCore;
 
-use ark_std::{
+use std::{
     collections::{BTreeMap, BTreeSet},
     rc::Rc,
     string::{String, ToString},
@@ -39,17 +38,7 @@ pub use error::*;
 /// checker.
 pub mod optional_rng;
 
-#[cfg(not(feature = "std"))]
-macro_rules! eprintln {
-    () => {};
-    ($($arg: tt)*) => {};
-}
-#[cfg(not(feature = "std"))]
-macro_rules! println {
-    () => {};
-    ($($arg: tt)*) => {};
-}
-/// The core [[KZG10]][kzg] construction.
+/*/// The core [[KZG10]][kzg] construction.
 ///
 /// [kzg]: http://cacr.uwaterloo.ca/techreports/2010/cacr2010-10.pdf
 pub mod kzg10;
@@ -73,6 +62,7 @@ pub mod marlin_pc;
 /// [al]: https://eprint.iacr.org/2019/601
 /// [marlin]: https://eprint.iacr.org/2019/1047
 pub mod sonic_pc;
+*/
 
 /// A polynomial commitment scheme based on the hardness of the
 /// discrete logarithm problem in prime-order groups.
@@ -129,7 +119,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// The evaluation proof for a query set.
     type BatchProof: Clone + From<Vec<Self::Proof>> + Into<Vec<Self::Proof>>;
     /// The error type for the scheme.
-    type Error: ark_std::error::Error + From<Error>;
+    type Error: std::error::Error + From<Error>;
 
     /// Constructs public parameters when given as input the maximum degree `degree`
     /// for the polynomial commitment scheme.
@@ -642,8 +632,8 @@ fn lc_query_set_to_poly_query_set<'a, F: 'a + Field>(
 #[cfg(test)]
 pub mod tests {
     use crate::*;
-    use ark_ff::{test_rng, Field};
-    use rand::{distributions::Distribution, Rng};
+    use algebra::Field;
+    use rand::{distributions::Distribution, Rng, thread_rng};
 
     #[derive(Default)]
     struct TestInfo {
@@ -661,7 +651,7 @@ pub mod tests {
         F: Field,
         PC: PolynomialCommitment<F>,
     {
-        let rng = &mut test_rng();
+        let rng = &mut thread_rng();
         let max_degree = 100;
         let pp = PC::setup(max_degree, rng)?;
 
@@ -759,7 +749,7 @@ pub mod tests {
             ..
         } = info;
 
-        let rng = &mut test_rng();
+        let rng = &mut thread_rng();
         let max_degree =
             max_degree.unwrap_or(rand::distributions::Uniform::from(2..=64).sample(rng));
         let pp = PC::setup(max_degree, rng)?;
@@ -894,7 +884,7 @@ pub mod tests {
             num_equations,
         } = info;
 
-        let rng = &mut test_rng();
+        let rng = &mut thread_rng();
         let max_degree =
             max_degree.unwrap_or(rand::distributions::Uniform::from(2..=64).sample(rng));
         let pp = PC::setup(max_degree, rng)?;

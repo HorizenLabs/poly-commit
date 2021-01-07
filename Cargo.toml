@@ -1,5 +1,5 @@
 [package]
-name = "ark-poly-commit"
+name = "poly-commit"
 version = "0.1.0"
 authors = [
   "Alessandro Chiesa <alexch@berkeley.edu>",
@@ -9,11 +9,10 @@ authors = [
   "Pratyush Mishra <pratyush@berkeley.edu>",
   "Noah Vesely <noah.vesely.18@ucl.ac.uk>",
   "Nicholas Ward <npward@berkeley.edu>",
-  "arkworks contributors"
+  "Daniele Di Benedetto <daniele@horizenlabs.io>"
 ]
 description = "A library for constructing polynomial commitment schemes for use in zkSNARKs"
-repository = "https://github.com/arkworks-rs/poly-commit"
-documentation = "https://docs.rs/ark-poly-commit/"
+repository = "https://github.com/HorizenLabs/poly-commit"
 keywords = ["cryptography", "polynomial commitments", "elliptic curves", "pairing"]
 categories = ["cryptography"]
 include = ["Cargo.toml", "src", "README.md", "LICENSE-APACHE", "LICENSE-MIT"]
@@ -21,41 +20,53 @@ license = "MIT/Apache-2.0"
 edition = "2018"
 
 [dependencies]
-ark-serialize = { git = "https://github.com/arkworks-rs/algebra", default-features = false, features = [ "derive" ] }
-ark-ff = { git = "https://github.com/arkworks-rs/algebra", default-features = false }
-ark-ec = { git = "https://github.com/arkworks-rs/algebra", default-features = false }
-ark-poly = { git = "https://github.com/arkworks-rs/algebra", default-features = false }
-
-ark-std = { git = "https://github.com/arkworks-rs/utils", default-features = false }
-
-bench-utils = { git = "https://github.com/arkworks-rs/utils", default-features = false  }
-
+algebra = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "algebra_ocl", features = ["parallel"] }
+algebra-utils = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "algebra_ocl", features = [ "parallel", "fft" ] }
+bench-utils = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "algebra_ocl" }
 rand_core = { version = "0.5", default-features = false }
 digest = "0.8"
-rayon = { version = "1", optional = true }
+rayon = { version = "1" }
 derivative = { version = "2", features = [ "use_core" ] }
+
+# gpu feature
+algebra-kernels = {git = "https://github.com/HorizenOfficial/ginger-algebra-ocl", branch = "ginger_ocl", optional = true }
 
 [dev-dependencies]
 rand = { version = "0.7", default-features = false }
-ark-ed-on-bls12-381 = { git = "https://github.com/arkworks-rs/curves", default-features = false }
-ark-bls12-381 = { git = "https://github.com/arkworks-rs/curves", default-features = false, features = [ "curve" ] }
-ark-bls12-377 = { git = "https://github.com/arkworks-rs/curves", default-features = false, features = [ "curve" ] }
+algebra = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "algebra_ocl", features = ["bls12_381", "jubjub", "bn_382", "bls12_377", "tweedle"] }
 blake2 = { version = "0.8", default-features = false }
+
+[features]
+asm = [ "algebra/llvm_asm" ]
+print-trace = [ "bench-utils/print-trace" ]
+gpu = [ "algebra-kernels", "algebra-utils/gpu" ]
 
 [profile.release]
 opt-level = 3
 lto = "thin"
 incremental = true
-debug = true
+debug-assertions = false
+debug = false
+
+[profile.bench]
+opt-level = 3
+rpath = false
+lto = "thin"
+incremental = true
+debug-assertions = false
+debug = false
+
+[profile.dev]
+opt-level = 3
+rpath = false
+lto = "thin"
+incremental = true
+debug-assertions = false
+debug = false
 
 [profile.test]
 opt-level = 3
-debug-assertions = true
+lto = "thin"
 incremental = true
-debug = true
-
-[features]
-default = [ "std", "parallel" ]
-std = [ "ark-ff/std", "ark-ec/std", "ark-poly/std", "ark-std/std", "ark-serialize/std" ]
-print-trace = [ "bench-utils/print-trace" ]
-parallel = [ "std", "ark-ff/parallel", "ark-ec/parallel", "ark-poly/parallel", "ark-std/parallel", "rayon" ]
+debug-assertions = false
+debug = false

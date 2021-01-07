@@ -8,14 +8,13 @@
 use crate::{BTreeMap, Error, LabeledPolynomial, PCRandomness, Polynomial, ToString, Vec};
 use ark_ec::msm::{FixedBaseMSM, VariableBaseMSM};
 use ark_ec::{group::Group, AffineCurve, PairingEngine, ProjectiveCurve};
-use ark_ff::{One, PrimeField, UniformRand, Zero};
+use algebra::{One, PrimeField, UniformRand, Zero};
 
 use rand_core::RngCore;
-#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-use ark_std::{format, vec};
-use core::marker::PhantomData;
+use std::{format, vec};
+use std::marker::PhantomData;
 
 mod data_structures;
 pub use data_structures::*;
@@ -458,7 +457,7 @@ fn skip_leading_zeros_and_convert_to_bigints<F: PrimeField>(
 
 fn convert_to_bigints<F: PrimeField>(p: &[F]) -> Vec<F::BigInt> {
     let to_bigint_time = start_timer!(|| "Converting polynomial coeffs to bigints");
-    let coeffs = ark_std::cfg_iter!(p)
+    let coeffs = p.par_iter()
         .map(|s| s.into_repr())
         .collect::<Vec<_>>();
     end_timer!(to_bigint_time);
@@ -474,7 +473,7 @@ mod tests {
     use ark_bls12_377::Bls12_377;
     use ark_bls12_381::Bls12_381;
     use ark_bls12_381::Fr;
-    use ark_ff::test_rng;
+    use algebra::test_rng;
 
     type KZG_Bls12_381 = KZG10<Bls12_381>;
 
@@ -494,8 +493,8 @@ mod tests {
                 .collect();
 
             let powers = Powers {
-                powers_of_g: ark_std::borrow::Cow::Owned(powers_of_g),
-                powers_of_gamma_g: ark_std::borrow::Cow::Owned(powers_of_gamma_g),
+                powers_of_g: std::borrow::Cow::Owned(powers_of_g),
+                powers_of_gamma_g: std::borrow::Cow::Owned(powers_of_gamma_g),
             };
             let vk = VerifierKey {
                 g: pp.powers_of_g[0],

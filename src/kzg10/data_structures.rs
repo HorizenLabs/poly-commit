@@ -1,8 +1,8 @@
 use crate::*;
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
-use ark_ff::{PrimeField, ToBytes, Zero};
-use ark_std::borrow::Cow;
-use core::ops::{Add, AddAssign};
+use algebra::{PrimeField, ToBytes, Zero};
+use std::borrow::Cow;
+use std::ops::{Add, AddAssign};
 
 /// `UniversalParams` are the universal parameters for the KZG10 scheme.
 #[derive(Derivative)]
@@ -77,7 +77,7 @@ pub struct VerifierKey<E: PairingEngine> {
 
 impl<E: PairingEngine> ToBytes for VerifierKey<E> {
     #[inline]
-    fn write<W: ark_std::io::Write>(&self, mut writer: W) -> ark_std::io::Result<()> {
+    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
         self.g.write(&mut writer)?;
         self.gamma_g.write(&mut writer)?;
         self.h.write(&mut writer)?;
@@ -138,7 +138,7 @@ pub struct Commitment<E: PairingEngine>(
 
 impl<E: PairingEngine> ToBytes for Commitment<E> {
     #[inline]
-    fn write<W: ark_std::io::Write>(&self, writer: W) -> ark_std::io::Result<()> {
+    fn write<W: std::io::Write>(&self, writer: W) -> std::io::Result<()> {
         self.0.write(writer)
     }
 }
@@ -154,7 +154,7 @@ impl<E: PairingEngine> PCCommitment for Commitment<E> {
     }
 
     fn size_in_bytes(&self) -> usize {
-        ark_ff::to_bytes![E::G1Affine::zero()].unwrap().len() / 2
+        to_bytes![E::G1Affine::zero()].unwrap().len() / 2
     }
 }
 
@@ -300,17 +300,17 @@ pub struct Proof<E: PairingEngine> {
 impl<E: PairingEngine> PCProof for Proof<E> {
     fn size_in_bytes(&self) -> usize {
         let hiding_size = if self.random_v.is_some() {
-            ark_ff::to_bytes![E::Fr::zero()].unwrap().len()
+            to_bytes![E::Fr::zero()].unwrap().len()
         } else {
             0
         };
-        ark_ff::to_bytes![E::G1Affine::zero()].unwrap().len() / 2 + hiding_size
+        to_bytes![E::G1Affine::zero()].unwrap().len() / 2 + hiding_size
     }
 }
 
 impl<E: PairingEngine> ToBytes for Proof<E> {
     #[inline]
-    fn write<W: ark_std::io::Write>(&self, mut writer: W) -> ark_std::io::Result<()> {
+    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
         self.w.write(&mut writer)?;
         self.random_v
             .as_ref()

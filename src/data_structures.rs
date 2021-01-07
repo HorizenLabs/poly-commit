@@ -1,8 +1,8 @@
 use crate::{Rc, String, Vec};
-use ark_ff::Field;
-pub use ark_poly::DensePolynomial as Polynomial;
-use core::borrow::Borrow;
-use core::ops::{AddAssign, MulAssign, SubAssign};
+use algebra::Field;
+pub use algebra_utils::DensePolynomial as Polynomial;
+use std::borrow::Borrow;
+use std::ops::{AddAssign, MulAssign, SubAssign};
 use rand_core::RngCore;
 
 /// Labels a `LabeledPolynomial` or a `LabeledCommitment`.
@@ -10,14 +10,14 @@ pub type PolynomialLabel = String;
 
 /// Defines the minimal interface for public params for any polynomial
 /// commitment scheme.
-pub trait PCUniversalParams: Clone + core::fmt::Debug {
+pub trait PCUniversalParams: Clone + std::fmt::Debug {
     /// Outputs the maximum degree supported by the committer key.
     fn max_degree(&self) -> usize;
 }
 
 /// Defines the minimal interface of committer keys for any polynomial
 /// commitment scheme.
-pub trait PCCommitterKey: Clone + core::fmt::Debug {
+pub trait PCCommitterKey: Clone + std::fmt::Debug {
     /// Outputs the maximum degree supported by the universal parameters
     /// `Self` was derived from.
     fn max_degree(&self) -> usize;
@@ -28,7 +28,7 @@ pub trait PCCommitterKey: Clone + core::fmt::Debug {
 
 /// Defines the minimal interface of verifier keys for any polynomial
 /// commitment scheme.
-pub trait PCVerifierKey: Clone + core::fmt::Debug {
+pub trait PCVerifierKey: Clone + std::fmt::Debug {
     /// Outputs the maximum degree supported by the universal parameters
     /// `Self` was derived from.
     fn max_degree(&self) -> usize;
@@ -46,7 +46,7 @@ pub trait PCPreparedVerifierKey<Unprepared: PCVerifierKey> {
 
 /// Defines the minimal interface of commitments for any polynomial
 /// commitment scheme.
-pub trait PCCommitment: Clone + ark_ff::ToBytes {
+pub trait PCCommitment: Clone + algebra::ToBytes {
     /// Outputs a non-hiding commitment to the zero polynomial.
     fn empty() -> Self;
 
@@ -79,7 +79,7 @@ pub trait PCRandomness: Clone {
 
 /// Defines the minimal interface of evaluation proofs for any polynomial
 /// commitment scheme.
-pub trait PCProof: Clone + ark_ff::ToBytes {
+pub trait PCProof: Clone + algebra::ToBytes {
     /// Size in bytes
     fn size_in_bytes(&self) -> usize;
 }
@@ -95,7 +95,7 @@ pub struct LabeledPolynomial<F: Field> {
     hiding_bound: Option<usize>,
 }
 
-impl<'a, F: Field> core::ops::Deref for LabeledPolynomial<F> {
+impl<'a, F: Field> std::ops::Deref for LabeledPolynomial<F> {
     type Target = Polynomial<F>;
 
     fn deref(&self) -> &Self::Target {
@@ -184,9 +184,9 @@ impl<C: PCCommitment> LabeledCommitment<C> {
     }
 }
 
-impl<C: PCCommitment> ark_ff::ToBytes for LabeledCommitment<C> {
+impl<C: PCCommitment> algebra::ToBytes for LabeledCommitment<C> {
     #[inline]
-    fn write<W: ark_std::io::Write>(&self, writer: W) -> ark_std::io::Result<()> {
+    fn write<W: std::io::Write>(&self, writer: W) -> std::io::Result<()> {
         self.commitment.write(writer)
     }
 }
@@ -224,7 +224,7 @@ impl<'a> From<&'a str> for LCTerm {
     }
 }
 
-impl core::convert::TryInto<PolynomialLabel> for LCTerm {
+impl std::convert::TryInto<PolynomialLabel> for LCTerm {
     type Error = ();
     fn try_into(self) -> Result<PolynomialLabel, ()> {
         match self {
@@ -234,7 +234,7 @@ impl core::convert::TryInto<PolynomialLabel> for LCTerm {
     }
 }
 
-impl<'a> core::convert::TryInto<&'a PolynomialLabel> for &'a LCTerm {
+impl<'a> std::convert::TryInto<&'a PolynomialLabel> for &'a LCTerm {
     type Error = ();
 
     fn try_into(self) -> Result<&'a PolynomialLabel, ()> {
@@ -344,7 +344,7 @@ impl<F: Field> MulAssign<F> for LinearCombination<F> {
     }
 }
 
-impl<F: Field> core::ops::Deref for LinearCombination<F> {
+impl<F: Field> std::ops::Deref for LinearCombination<F> {
     type Target = [(F, LCTerm)];
 
     fn deref(&self) -> &Self::Target {

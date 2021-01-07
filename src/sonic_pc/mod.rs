@@ -5,9 +5,9 @@ use crate::{LabeledCommitment, LabeledPolynomial, LinearCombination};
 use crate::{PCRandomness, PCUniversalParams, Polynomial, PolynomialCommitment};
 
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
-use ark_ff::{One, UniformRand, Zero};
-use ark_std::vec;
-use core::{convert::TryInto, marker::PhantomData};
+use algebra::{One, UniformRand, Zero};
+use std::vec;
+use std::{convert::TryInto, marker::PhantomData};
 use rand_core::RngCore;
 
 mod data_structures;
@@ -546,7 +546,7 @@ impl<E: PairingEngine> PolynomialCommitment<E::Fr> for SonicKZG10<E> {
                 }
 
                 // Some(_) > None, always.
-                hiding_bound = core::cmp::max(hiding_bound, cur_poly.hiding_bound());
+                hiding_bound = std::cmp::max(hiding_bound, cur_poly.hiding_bound());
                 poly += (*coeff, cur_poly.polynomial());
                 randomness += (*coeff, cur_rand);
                 comm += &curr_comm.commitment().0.into_projective().mul(*coeff);

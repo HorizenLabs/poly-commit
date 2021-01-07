@@ -5,9 +5,9 @@ use crate::{LabeledCommitment, LabeledPolynomial, LinearCombination};
 use crate::{PCRandomness, PCUniversalParams, Polynomial, PolynomialCommitment};
 
 use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
-use ark_ff::{One, Zero};
-use ark_std::vec;
-use core::{convert::TryInto, marker::PhantomData};
+use algebra::{One, Zero};
+use std::vec;
+use std::{convert::TryInto, marker::PhantomData};
 use rand_core::RngCore;
 
 mod data_structures;
@@ -602,7 +602,7 @@ impl<E: PairingEngine> PolynomialCommitment<E::Fr> for MarlinKZG10<E> {
                 }
 
                 // Some(_) > None, always.
-                hiding_bound = core::cmp::max(hiding_bound, cur_poly.hiding_bound());
+                hiding_bound = std::cmp::max(hiding_bound, cur_poly.hiding_bound());
                 poly += (*coeff, cur_poly.polynomial());
                 randomness += (*coeff, cur_rand);
                 coeffs_and_comms.push((*coeff, cur_comm.commitment()));

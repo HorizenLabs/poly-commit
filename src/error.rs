@@ -84,8 +84,8 @@ pub enum Error {
     MalformedCommitment(String),
 }
 
-impl core::fmt::Display for Error {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::MissingPolynomial { label } => write!(
                 f,
@@ -160,4 +160,4 @@ impl core::fmt::Display for Error {
     }
 }
 
-impl ark_std::error::Error for Error {}
+impl std::error::Error for Error {}

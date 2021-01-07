@@ -3,8 +3,8 @@ use crate::{
     PCVerifierKey, Vec,
 };
 use ark_ec::{PairingEngine, ProjectiveCurve};
-use ark_ff::{PrimeField, ToBytes};
-use core::ops::{Add, AddAssign};
+use algebra::{PrimeField, ToBytes};
+use std::ops::{Add, AddAssign};
 use rand_core::RngCore;
 
 use crate::kzg10;
@@ -132,7 +132,7 @@ impl<E: PairingEngine> PCVerifierKey for VerifierKey<E> {
 
 impl<E: PairingEngine> ToBytes for VerifierKey<E> {
     #[inline]
-    fn write<W: ark_std::io::Write>(&self, mut writer: W) -> ark_std::io::Result<()> {
+    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
         self.vk.write(&mut writer)?;
         if let Some(degree_bounds_and_shift_powers) = &self.degree_bounds_and_shift_powers {
             writer.write_all(&degree_bounds_and_shift_powers.len().to_le_bytes())?;
@@ -227,7 +227,7 @@ pub struct Commitment<E: PairingEngine> {
 
 impl<E: PairingEngine> ToBytes for Commitment<E> {
     #[inline]
-    fn write<W: ark_std::io::Write>(&self, mut writer: W) -> ark_std::io::Result<()> {
+    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
         self.comm.write(&mut writer)?;
         let shifted_exists = self.shifted_comm.is_some();
         shifted_exists.write(&mut writer)?;
