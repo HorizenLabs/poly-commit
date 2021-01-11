@@ -1,6 +1,6 @@
 use crate::*;
 use crate::{PCCommitterKey, PCVerifierKey, Vec};
-use algebra::{Field, ToBytes, to_bytes, UniformRand, AffineCurve};
+use algebra::{Field, ToBytes, to_bytes, UniformRand, AffineCurve, ToConstraintField};
 use std::vec;
 use rand_core::RngCore;
 
@@ -100,6 +100,21 @@ pub struct Commitment<G: AffineCurve> {
     /// This is `none` if the committed polynomial does not
     /// enforce a strict degree bound.
     pub shifted_comm: Option<G>,
+}
+
+impl<F, G> ToConstraintField<F> for Commitment<G>
+where
+    F: Field,
+    G: AffineCurve<BaseField = F> + ToConstraintField<F>
+{
+    fn to_field_elements(&self) -> Result<Vec<F>, Box<dyn std::error::Error>> {
+        let mut output = self.comm.to_field_elements()?;
+        if self.shifted_comm.is_some() {
+            let fes = self.shifted_comm.unwrap().to_field_elements()?;
+            output.extend_from_slice(fes.as_slice());
+        }
+        Ok(output)
+    }
 }
 
 impl<G: AffineCurve> PCCommitment for Commitment<G> {

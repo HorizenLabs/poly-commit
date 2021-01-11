@@ -1,5 +1,5 @@
 use crate::{Rc, String, Vec};
-use algebra::Field;
+use algebra::{Field, ToConstraintField};
 pub use algebra_utils::DensePolynomial as Polynomial;
 use std::borrow::Borrow;
 use std::ops::{AddAssign, MulAssign, SubAssign};
@@ -188,6 +188,13 @@ impl<C: PCCommitment> algebra::ToBytes for LabeledCommitment<C> {
     #[inline]
     fn write<W: std::io::Write>(&self, writer: W) -> std::io::Result<()> {
         self.commitment.write(writer)
+    }
+}
+
+impl<F: Field, C: PCCommitment + ToConstraintField<F>> ToConstraintField<F> for LabeledCommitment<C>
+{
+    fn to_field_elements(&self) -> Option<Vec<F>> {
+        self.commitment.to_field_elements()
     }
 }
 
