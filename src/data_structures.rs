@@ -193,7 +193,7 @@ impl<C: PCCommitment> algebra::ToBytes for LabeledCommitment<C> {
 
 impl<F: Field, C: PCCommitment + ToConstraintField<F>> ToConstraintField<F> for LabeledCommitment<C>
 {
-    fn to_field_elements(&self) -> Option<Vec<F>> {
+    fn to_field_elements(&self) -> Result<Vec<F>, Box<dyn std::error::Error>> {
         self.commitment.to_field_elements()
     }
 }
