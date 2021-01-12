@@ -33,10 +33,15 @@ pub use data_structures::*;
 /// Errors pertaining to query sets.
 pub mod error;
 pub use error::*;
+use digest::Digest;
 
 /// A random number generator that bypasses some limitations of the Rust borrow
 /// checker.
 pub mod optional_rng;
+
+/// Implements a Fiat-Shamir based Rng that allows one to incrementally update
+/// the seed based on new messages in the proof transcript.
+pub mod fiat_shamir;
 
 /*/// The core [[KZG10]][kzg] construction.
 ///
@@ -123,7 +128,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
 
     /// Constructs public parameters when given as input the maximum degree `degree`
     /// for the polynomial commitment scheme.
-    fn setup<R: RngCore>(
+    fn setup<R: RngCore, D: Digest>(
         max_degree: usize,
         rng: &mut R,
     ) -> Result<Self::UniversalParams, Self::Error>;
@@ -646,14 +651,15 @@ pub mod tests {
         num_equations: Option<usize>,
     }
 
-    pub fn bad_degree_bound_test<F, PC>() -> Result<(), PC::Error>
+    pub fn bad_degree_bound_test<F, PC, D>() -> Result<(), PC::Error>
     where
         F: Field,
         PC: PolynomialCommitment<F>,
+        D: Digest
     {
         let rng = &mut thread_rng();
         let max_degree = 100;
-        let pp = PC::setup(max_degree, rng)?;
+        let pp = PC::setup::<_, D>(max_degree, rng)?;
 
         for _ in 0..10 {
             let supported_degree = rand::distributions::Uniform::from(1..=max_degree).sample(rng);
@@ -734,10 +740,11 @@ pub mod tests {
         Ok(())
     }
 
-    fn test_template<F, PC>(info: TestInfo) -> Result<(), PC::Error>
+    fn test_template<F, PC, D>(info: TestInfo) -> Result<(), PC::Error>
     where
         F: Field,
         PC: PolynomialCommitment<F>,
+        D: Digest,
     {
         let TestInfo {
             num_iters,
@@ -752,7 +759,7 @@ pub mod tests {
         let rng = &mut thread_rng();
         let max_degree =
             max_degree.unwrap_or(rand::distributions::Uniform::from(2..=64).sample(rng));
-        let pp = PC::setup(max_degree, rng)?;
+        let pp = PC::setup::<_, D>(max_degree, rng)?;
 
         for _ in 0..num_iters {
             let supported_degree = supported_degree
@@ -869,10 +876,11 @@ pub mod tests {
         Ok(())
     }
 
-    fn equation_test_template<F, PC>(info: TestInfo) -> Result<(), PC::Error>
+    fn equation_test_template<F, PC, D>(info: TestInfo) -> Result<(), PC::Error>
     where
         F: Field,
         PC: PolynomialCommitment<F>,
+        D: Digest,
     {
         let TestInfo {
             num_iters,
@@ -887,7 +895,7 @@ pub mod tests {
         let rng = &mut thread_rng();
         let max_degree =
             max_degree.unwrap_or(rand::distributions::Uniform::from(2..=64).sample(rng));
-        let pp = PC::setup(max_degree, rng)?;
+        let pp = PC::setup::<_, D>(max_degree, rng)?;
 
         for _ in 0..num_iters {
             let supported_degree = supported_degree
@@ -1042,10 +1050,11 @@ pub mod tests {
         Ok(())
     }
 
-    pub fn single_poly_test<F, PC>() -> Result<(), PC::Error>
+    pub fn single_poly_test<F, PC, D>() -> Result<(), PC::Error>
     where
         F: Field,
         PC: PolynomialCommitment<F>,
+        D: Digest,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1056,13 +1065,14 @@ pub mod tests {
             max_num_queries: 1,
             ..Default::default()
         };
-        test_template::<F, PC>(info)
+        test_template::<F, PC, D>(info)
     }
 
-    pub fn linear_poly_degree_bound_test<F, PC>() -> Result<(), PC::Error>
+    pub fn linear_poly_degree_bound_test<F, PC, D>() -> Result<(), PC::Error>
     where
         F: Field,
         PC: PolynomialCommitment<F>,
+        D: Digest,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1073,13 +1083,14 @@ pub mod tests {
             max_num_queries: 1,
             ..Default::default()
         };
-        test_template::<F, PC>(info)
+        test_template::<F, PC, D>(info)
     }
 
-    pub fn single_poly_degree_bound_test<F, PC>() -> Result<(), PC::Error>
+    pub fn single_poly_degree_bound_test<F, PC, D>() -> Result<(), PC::Error>
     where
         F: Field,
         PC: PolynomialCommitment<F>,
+        D: Digest,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1090,13 +1101,14 @@ pub mod tests {
             max_num_queries: 1,
             ..Default::default()
         };
-        test_template::<F, PC>(info)
+        test_template::<F, PC, D>(info)
     }
 
-    pub fn quadratic_poly_degree_bound_multiple_queries_test<F, PC>() -> Result<(), PC::Error>
+    pub fn quadratic_poly_degree_bound_multiple_queries_test<F, PC, D>() -> Result<(), PC::Error>
     where
         F: Field,
         PC: PolynomialCommitment<F>,
+        D: Digest,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1107,13 +1119,14 @@ pub mod tests {
             max_num_queries: 2,
             ..Default::default()
         };
-        test_template::<F, PC>(info)
+        test_template::<F, PC, D>(info)
     }
 
-    pub fn single_poly_degree_bound_multiple_queries_test<F, PC>() -> Result<(), PC::Error>
+    pub fn single_poly_degree_bound_multiple_queries_test<F, PC, D>() -> Result<(), PC::Error>
     where
         F: Field,
         PC: PolynomialCommitment<F>,
+        D: Digest,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1124,13 +1137,14 @@ pub mod tests {
             max_num_queries: 2,
             ..Default::default()
         };
-        test_template::<F, PC>(info)
+        test_template::<F, PC, D>(info)
     }
 
-    pub fn two_polys_degree_bound_single_query_test<F, PC>() -> Result<(), PC::Error>
+    pub fn two_polys_degree_bound_single_query_test<F, PC, D>() -> Result<(), PC::Error>
     where
         F: Field,
         PC: PolynomialCommitment<F>,
+        D: Digest,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1141,13 +1155,14 @@ pub mod tests {
             max_num_queries: 1,
             ..Default::default()
         };
-        test_template::<F, PC>(info)
+        test_template::<F, PC, D>(info)
     }
 
-    pub fn full_end_to_end_test<F, PC>() -> Result<(), PC::Error>
+    pub fn full_end_to_end_test<F, PC, D>() -> Result<(), PC::Error>
     where
         F: Field,
         PC: PolynomialCommitment<F>,
+        D: Digest,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1158,13 +1173,14 @@ pub mod tests {
             max_num_queries: 5,
             ..Default::default()
         };
-        test_template::<F, PC>(info)
+        test_template::<F, PC, D>(info)
     }
 
-    pub fn full_end_to_end_equation_test<F, PC>() -> Result<(), PC::Error>
+    pub fn full_end_to_end_equation_test<F, PC, D>() -> Result<(), PC::Error>
     where
         F: Field,
         PC: PolynomialCommitment<F>,
+        D: Digest,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1175,13 +1191,14 @@ pub mod tests {
             max_num_queries: 5,
             num_equations: Some(10),
         };
-        equation_test_template::<F, PC>(info)
+        equation_test_template::<F, PC, D>(info)
     }
 
-    pub fn single_equation_test<F, PC>() -> Result<(), PC::Error>
+    pub fn single_equation_test<F, PC, D>() -> Result<(), PC::Error>
     where
         F: Field,
         PC: PolynomialCommitment<F>,
+        D: Digest,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1192,13 +1209,14 @@ pub mod tests {
             max_num_queries: 1,
             num_equations: Some(1),
         };
-        equation_test_template::<F, PC>(info)
+        equation_test_template::<F, PC, D>(info)
     }
 
-    pub fn two_equation_test<F, PC>() -> Result<(), PC::Error>
+    pub fn two_equation_test<F, PC, D>() -> Result<(), PC::Error>
     where
         F: Field,
         PC: PolynomialCommitment<F>,
+        D: Digest,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1209,13 +1227,14 @@ pub mod tests {
             max_num_queries: 1,
             num_equations: Some(2),
         };
-        equation_test_template::<F, PC>(info)
+        equation_test_template::<F, PC, D>(info)
     }
 
-    pub fn two_equation_degree_bound_test<F, PC>() -> Result<(), PC::Error>
+    pub fn two_equation_degree_bound_test<F, PC, D>() -> Result<(), PC::Error>
     where
-        F: Field,
+        F:  Field,
         PC: PolynomialCommitment<F>,
+        D:  Digest,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1226,6 +1245,6 @@ pub mod tests {
             max_num_queries: 1,
             num_equations: Some(2),
         };
-        equation_test_template::<F, PC>(info)
+        equation_test_template::<F, PC, D>(info)
     }
 }

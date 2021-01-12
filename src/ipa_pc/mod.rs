@@ -18,6 +18,7 @@ use rayon::prelude::*;
 use algebra_kernels::polycommit::{get_kernels, get_gpu_min_length};
 
 use digest::Digest;
+use crate::fiat_shamir::FiatShamirRng;
 
 /// A polynomial commitment scheme based on the hardness of the
 /// discrete logarithm problem in prime-order groups.
@@ -32,12 +33,12 @@ use digest::Digest;
 ///
 /// [pcdas]: https://eprint.iacr.org/2020/499
 /// [marlin]: https://eprint.iacr.org/2019/1047
-pub struct InnerProductArgPC<G: AffineCurve, D: Digest> {
+pub struct InnerProductArgPC<G: AffineCurve, FS: FiatShamirRng<G::ScalarField, <G::BaseField as Field>::BasePrimeField>> {
     _projective: PhantomData<G>,
-    _digest: PhantomData<D>,
+    _digest: PhantomData<FS>,
 }
 
-impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
+impl<G: AffineCurve, FS: FiatShamirRng<G::ScalarField, <G::BaseField as Field>::BasePrimeField>> InnerProductArgPC<G, FS> {
     /// `PROTOCOL_NAME` is used as a seed for the setup function.
     pub const PROTOCOL_NAME: &'static [u8] = b"PC-DL-2020";
 
@@ -61,18 +62,9 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         comm
     }
 
-    fn compute_random_oracle_challenge(bytes: &[u8]) -> G::ScalarField {
-        let mut i = 0u64;
-        let mut challenge = None;
-        while challenge.is_none() {
-            let hash_input = to_bytes![bytes, i].unwrap();
-            let hash = D::digest(&hash_input);
-            challenge = <G::ScalarField as PrimeField>::from_random_bytes(&hash);
-
-            i += 1;
-        }
-
-        challenge.unwrap()
+    fn compute_random_oracle_challenge(bytes: &[u8], fs_rng: &mut FS) -> G::ScalarField {
+        fs_rng.absorb_bytes(bytes);
+        fs_rng.squeeze_nonnative_field_elements(1)[0]
     }
 
     #[inline]
@@ -133,18 +125,23 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         if proof.hiding_comm.is_some() {
             let hiding_comm = proof.hiding_comm.unwrap();
             let rand = proof.rand.unwrap();
+            let mut fs_rng = FS::new();
 
             let hiding_challenge = Self::compute_random_oracle_challenge(
                 &to_bytes![combined_commitment, point, combined_v, hiding_comm].unwrap(),
+                &mut fs_rng
             );
             combined_commitment_proj += &(hiding_comm.mul(hiding_challenge) - &vk.s.mul(rand));
             combined_commitment = combined_commitment_proj.into_affine();
         }
 
+        let mut fs_rng = FS::new();
+
         // Challenge for each round
         let mut round_challenges = Vec::with_capacity(log_d);
         let mut round_challenge = Self::compute_random_oracle_challenge(
             &to_bytes![combined_commitment, point, combined_v].unwrap(),
+            &mut fs_rng
         );
 
         let h_prime = vk.h.mul(round_challenge);
@@ -157,6 +154,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         for (l, r) in l_iter.zip(r_iter) {
             round_challenge = Self::compute_random_oracle_challenge(
                 &to_bytes![round_challenge, l, r].unwrap(),
+                &mut fs_rng
             );
             round_challenges.push(round_challenge);
             round_commitment_proj +=
@@ -286,7 +284,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         return commitments;
     }
 
-    fn sample_generators(num_generators: usize) -> Vec<G> {
+    // Let's use a non algebraic hash here to speed up the sampling process
+    fn sample_generators<D: Digest>(num_generators: usize) -> Vec<G> {
         let generators: Vec<_> = (0..num_generators).into_par_iter()
             .map(|i| {
                 let i = i as u64;
@@ -356,7 +355,11 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     }
 }
 
-impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerProductArgPC<G, D> {
+impl<G, FS> PolynomialCommitment<G::ScalarField> for InnerProductArgPC<G, FS>
+where
+    G: AffineCurve,
+    FS: FiatShamirRng<G::ScalarField, <G::BaseField as Field>::BasePrimeField>
+{
     type UniversalParams = UniversalParams<G>;
     type CommitterKey = CommitterKey<G>;
     type VerifierKey = VerifierKey<G>;
@@ -368,7 +371,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
     type BatchProof = Vec<Self::Proof>;
     type Error = Error;
 
-    fn setup<R: RngCore>(
+    fn setup<R: RngCore, D: Digest>(
         max_degree: usize,
         _rng: &mut R,
     ) -> Result<Self::UniversalParams, Self::Error> {
@@ -376,7 +379,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let max_degree = (max_degree + 1).next_power_of_two() - 1;
 
         let setup_time = start_timer!(|| format!("Sampling {} generators", max_degree + 3));
-        let mut generators = Self::sample_generators(max_degree + 3);
+        let mut generators = Self::sample_generators::<D>(max_degree + 3);
         end_timer!(setup_time);
 
         let h = generators.pop().unwrap();
@@ -617,6 +620,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             hiding_commitment = Some(batch.pop().unwrap());
             combined_commitment = batch.pop().unwrap();
 
+            let mut fs_rng = FS::new();
             let hiding_challenge = Self::compute_random_oracle_challenge(
                 &to_bytes![
                     combined_commitment,
@@ -625,6 +629,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                     hiding_commitment.unwrap()
                 ]
                 .unwrap(),
+                &mut fs_rng
             );
             combined_polynomial += (hiding_challenge, &hiding_polynomial);
             combined_rand += &(hiding_challenge * &hiding_rand);
@@ -646,8 +651,10 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         combined_commitment = combined_commitment_proj.into_affine();
 
         // ith challenge
+        let mut fs_rng = FS::new();
         let mut round_challenge = Self::compute_random_oracle_challenge(
             &to_bytes![combined_commitment, point, combined_v].unwrap(),
+            &mut fs_rng
         );
 
         let h_prime = ck.h.mul(round_challenge).into_affine();
@@ -702,6 +709,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
             round_challenge = Self::compute_random_oracle_challenge(
                 &to_bytes![round_challenge, lr[0], lr[1]].unwrap(),
+                &mut fs_rng
             );
             let round_challenge_inv = round_challenge.inverse().unwrap();
 
@@ -1077,80 +1085,84 @@ mod tests {
 
     use super::InnerProductArgPC;
 
-    use algebra::curves::tweedle::dee::{
-        Affine, Projective,
+    use algebra::{
+        fields::bn_382::Fq,
+        curves::bn_382::g::{
+            Affine, Projective,
+        }
     };
     use blake2::Blake2s;
+    use primitives::crh::poseidon::bn382::BN382FrPoseidonHash;
 
-    type PC<E, D> = InnerProductArgPC<E, D>;
-    type PC_DEE = PC<Affine, Blake2s>;
+    type PC<E, FS> = InnerProductArgPC<E, FS>;
+    type PC_BN382 = PC<Affine, BN382FrPoseidonHash>;
 
     #[test]
     fn single_poly_test() {
         use crate::tests::*;
-        single_poly_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
+        single_poly_test::<_, PC_BN382, Blake2s>().expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn quadratic_poly_degree_bound_multiple_queries_test() {
         use crate::tests::*;
-        quadratic_poly_degree_bound_multiple_queries_test::<_, PC_DEE>()
+        quadratic_poly_degree_bound_multiple_queries_test::<_, PC_BN382, Blake2s>()
             .expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn linear_poly_degree_bound_test() {
         use crate::tests::*;
-        linear_poly_degree_bound_test::<_, PC_DEE>()
+        linear_poly_degree_bound_test::<_, PC_BN382, Blake2s>()
             .expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn single_poly_degree_bound_test() {
         use crate::tests::*;
-        single_poly_degree_bound_test::<_, PC_DEE>()
+        single_poly_degree_bound_test::<_, PC_BN382, Blake2s>()
             .expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn single_poly_degree_bound_multiple_queries_test() {
         use crate::tests::*;
-        single_poly_degree_bound_multiple_queries_test::<_, PC_DEE>()
+        single_poly_degree_bound_multiple_queries_test::<_, PC_BN382, Blake2s>()
             .expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn two_polys_degree_bound_single_query_test() {
         use crate::tests::*;
-        two_polys_degree_bound_single_query_test::<_, PC_DEE>()
+        two_polys_degree_bound_single_query_test::<_, PC_BN382, Blake2s>()
             .expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn full_end_to_end_test() {
         use crate::tests::*;
-        full_end_to_end_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
+        full_end_to_end_test::<_, PC_BN382, Blake2s>().expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
 
     #[test]
     fn single_equation_test() {
         use crate::tests::*;
-        single_equation_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
+        single_equation_test::<_, PC_BN382, Blake2s>().expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
 
     #[test]
     fn two_equation_test() {
         use crate::tests::*;
-        two_equation_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
+        two_equation_test::<_, PC_BN382, Blake2s>().expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
 
     #[test]
     fn two_equation_degree_bound_test() {
         use crate::tests::*;
-        two_equation_degree_bound_test::<_, PC_DEE>()
+        two_equation_degree_bound_test::<_, PC_BN382, Blake2s>()
             .expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
@@ -1158,7 +1170,7 @@ mod tests {
     #[test]
     fn full_end_to_end_equation_test() {
         use crate::tests::*;
-        full_end_to_end_equation_test::<_, PC_DEE>()
+        full_end_to_end_equation_test::<_, PC_BN382, Blake2s>()
             .expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
@@ -1167,37 +1179,36 @@ mod tests {
     #[should_panic]
     fn bad_degree_bound_test() {
         use crate::tests::*;
-        bad_degree_bound_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
+        bad_degree_bound_test::<_, PC_BN382, Blake2s>().expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
 
     #[test]
     fn polycommit_round_reduce_test() {
-        use algebra::fields::tweedle::fr::Fr;
         use algebra::{UniformRand, AffineCurve, ProjectiveCurve, Field};
         use rayon::prelude::*;
 
         let mut rng = &mut rand::thread_rng();
 
-        let round_challenge = Fr::rand(&mut rng);
+        let round_challenge = Fq::rand(&mut rng);
         let round_challenge_inv = round_challenge.inverse().unwrap();
 
         let samples = 1 << 10;
 
         let mut coeffs_l = (0..samples)
-            .map(|_| Fr::rand(&mut rng))
+            .map(|_| Fq::rand(&mut rng))
             .collect::<Vec<_>>();
 
         let coeffs_r = (0..samples)
-            .map(|_| Fr::rand(&mut rng))
+            .map(|_| Fq::rand(&mut rng))
             .collect::<Vec<_>>();
 
         let mut z_l = (0..samples)
-            .map(|_| Fr::rand(&mut rng))
+            .map(|_| Fq::rand(&mut rng))
             .collect::<Vec<_>>();
 
         let z_r= (0..samples)
-            .map(|_| Fr::rand(&mut rng))
+            .map(|_| Fq::rand(&mut rng))
             .collect::<Vec<_>>();
 
         let mut key_proj_l= (0..samples)
@@ -1227,7 +1238,7 @@ mod tests {
             .zip(key_r)
             .for_each(|(k_l, k_r)| *k_l += &k_r.mul(round_challenge));
 
-        PC_DEE::polycommit_round_reduce(
+        PC_BN382::polycommit_round_reduce(
             round_challenge,
             round_challenge_inv,
             &mut gpu_coeffs_l,
