@@ -58,6 +58,28 @@ impl<G: AffineCurve> PCCommitterKey for CommitterKey<G> {
     }
 }
 
+impl<F, G> ToConstraintField<F> for CommitterKey<G>
+    where
+        F: Field,
+        G: AffineCurve<BaseField = F> + ToConstraintField<F>
+{
+    fn to_field_elements(&self) -> Result<Vec<F>, Box<dyn std::error::Error>> {
+        let mut output = Vec::new();
+
+        for g in self.comm_key.iter() {
+            let g_as_fes = g.to_field_elements()?;
+            output.extend_from_slice(g_as_fes.as_slice());
+        }
+        let h_as_fes = self.h.to_field_elements()?;
+        output.extend_from_slice(h_as_fes.as_slice());
+        let s_as_fes = self.s.to_field_elements()?;
+        output.extend_from_slice(s_as_fes.as_slice());
+        let max_degree_as_fe = F::from(self.max_degree as u32);
+        output.push(max_degree_as_fe);
+        Ok(output)
+    }
+}
+
 /// `VerifierKey` is used to check evaluation proofs for a given commitment.
 pub type VerifierKey<G> = CommitterKey<G>;
 
