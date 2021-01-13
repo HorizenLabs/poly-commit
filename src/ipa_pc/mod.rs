@@ -526,7 +526,6 @@ where
         let mut opening_challenge_counter = 0;
         let mut cur_challenge = opening_challenges(opening_challenge_counter);
         opening_challenge_counter += 1;
-
         for (labeled_polynomial, (labeled_commitment, randomness)) in
             polys_iter.zip(comms_iter.zip(rands_iter))
         {
@@ -580,7 +579,6 @@ where
                     combined_rand += &(cur_challenge * &shifted_rand.unwrap());
                 }
             }
-
             cur_challenge = opening_challenges(opening_challenge_counter);
             opening_challenge_counter += 1;
         }
