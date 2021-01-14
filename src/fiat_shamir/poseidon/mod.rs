@@ -2,6 +2,14 @@ use algebra::{PrimeField, ToConstraintField, FpParameters};
 use primitives::{PoseidonParameters, PoseidonSBox, PoseidonHash, AlgebraicSponge};
 use crate::fiat_shamir::FiatShamirRng;
 
+/// PoseidonHashGadget-backed implementation of FiatShamirRngGadget
+pub mod constraints;
+
+//TODO: This primitive might be slightly sped-up by working at byte level instead of bit level;
+//      However, we need some extra care and new gadgets in the circuit (like a FromBytes gadget)
+//      and I'm worried that the bytes corresponding to REPR_SHAVE_BITS (that will be all 0),
+//      might affect security (maybe not).
+//      Still, in terms of number of constraints, working on bit level is slightly cheaper.
 impl<F, ConstraintF, P, SB> FiatShamirRng<F, ConstraintF> for PoseidonHash<ConstraintF, P, SB>
 where
     F: PrimeField,
@@ -32,18 +40,36 @@ where
     }
 
     fn absorb_bytes(&mut self, elems: &[u8]) {
-        self.absorb(elems.to_field_elements().unwrap())
+        let bits: Vec<bool> = elems
+            .iter()
+            .flat_map(|byte| primitives::bytes_to_bits(&[*byte]).iter().rev().cloned().collect::<Vec<bool>>())
+            .collect();
+        let fes = bits.to_field_elements().unwrap();
+        self.absorb(fes)
     }
 
     fn squeeze_nonnative_field_elements(&mut self, num: usize) -> Vec<F> {
-        let nonnative_bits = F::Params::MODULUS_BITS as usize;
+        // Compute number of native field elements we need in order to satisfy the request of
+        // num non-native field elements as output
+        let nonnative_bits = F::Params::CAPACITY as usize;
         let required_bits = num * nonnative_bits;
-        let required_native_fes = ((required_bits/ConstraintF::Params::MODULUS_BITS as usize) as f64).ceil() as usize;
+        let required_native_fes = {
+            let num = (required_bits/ConstraintF::Params::CAPACITY as usize) as f64;
+            if num == 0.0 { 1 } else { num.ceil() as usize }
+        };
+
+        // Squeeze required number of native field elements
         let native_squeeze = self.squeeze(required_native_fes);
+
+        // Serialize them to bits
         let native_bits = native_squeeze
             .into_iter()
-            .flat_map(|native_fe| { native_fe.write_bits() })
+            // Take only capacity bits: this will avoid a range check in the corresponding gadget
+            // This doesn't affect security as we are truncating the squeeze outputs.
+            .flat_map(|native_fe: ConstraintF| { native_fe.write_bits() })
             .collect::<Vec<_>>();
+
+        // Read non-native field elements from the bit vector, and return the required num
         native_bits.to_field_elements().unwrap().into_iter().take(num).collect()
     }
 
@@ -69,7 +95,6 @@ where
         let outputs_bits = self
             .squeeze_nonnative_field_elements(to_squeeze)
             .into_iter()
-            // Take only up to capacity bits for each field element for safety reasons
             .flat_map(|fe: F|{ fe.write_bits() }).collect::<Vec<_>>();
 
         // Take the required amount of 128 bits chunks and read (safely) a non-native field
@@ -83,7 +108,6 @@ where
 #[cfg(test)]
 mod test {
     use algebra::UniformRand;
-    use algebra::Field;
     use crate::fiat_shamir::test::{
         test_absorb_squeeze_vals, test_squeeze_consistency
     };
@@ -110,6 +134,7 @@ mod test {
             non_native_inputs,
             native_inputs,
             byte_inputs,
+
             (
                 Fq::new(BigInteger384([12016618990178755936, 113170861864162129, 4879244684047526131, 7536486198472387696, 3005199297160601854, 578436848701623138])),
                 Fr::new(BigInteger384([14108808286947537994, 438659023141181977, 12200179818727041293, 17425304848456118616, 1469018988105606060, 185938356707883218])),
@@ -121,9 +146,9 @@ mod test {
                 Fq::new(BigInteger384([883559833201629700, 2297720271747027573, 10293539329733317053, 11843502315766683749, 9971289791846452217, 2129217580708431512])),
             ),
             (
-                Fq::new(BigInteger384([513053810803578672, 7530681841182222479, 15326720777474478954, 3505942186199816556, 13039918664536402907, 130850777284692362])),
-                Fr::new(BigInteger384([1542590251762147648, 2722798784902968232, 1713996813525160003, 3543999843068584726, 3941339554764723901, 384234973420389694])),
-                Fq::new(BigInteger384([14476380984122801959, 1716569318915182351, 13801471748917959059, 3705522168593578253, 15662976797441036197, 1162504701503425291])),
+                Fq::new(BigInteger384([1802634151726318859, 8932725432101101824, 17438325308273051863, 9195168340551825907, 8660026696007698207, 737597761618078455])),
+                Fr::new(BigInteger384([2254176659747291193, 10909760097727274831, 1525194543008054803, 16228547171091262680, 2057160796565236781, 2328269622461191271])),
+                Fq::new(BigInteger384([11397267253093576887, 353312307280226882, 5804830282428411167, 12502402992812411140, 3473442075068307199, 700133953511294972])),
             )
         );
 

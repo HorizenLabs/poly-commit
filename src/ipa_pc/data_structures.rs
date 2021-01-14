@@ -67,15 +67,19 @@ impl<F, G> ToConstraintField<F> for CommitterKey<G>
         let mut output = Vec::new();
 
         for g in self.comm_key.iter() {
-            let g_as_fes = g.to_field_elements()?;
-            output.extend_from_slice(g_as_fes.as_slice());
+            let mut g_as_fes = g.to_field_elements()?;
+            output.append(&mut g_as_fes);
         }
-        let h_as_fes = self.h.to_field_elements()?;
-        output.extend_from_slice(h_as_fes.as_slice());
-        let s_as_fes = self.s.to_field_elements()?;
-        output.extend_from_slice(s_as_fes.as_slice());
+
+        let mut h_as_fes = self.h.to_field_elements()?;
+        output.append(&mut h_as_fes);
+
+        let mut s_as_fes = self.s.to_field_elements()?;
+        output.append(&mut s_as_fes);
+
         let max_degree_as_fe = F::from(self.max_degree as u32);
         output.push(max_degree_as_fe);
+
         Ok(output)
     }
 }
@@ -132,8 +136,8 @@ where
     fn to_field_elements(&self) -> Result<Vec<F>, Box<dyn std::error::Error>> {
         let mut output = self.comm.to_field_elements()?;
         if self.shifted_comm.is_some() {
-            let fes = self.shifted_comm.unwrap().to_field_elements()?;
-            output.extend_from_slice(fes.as_slice());
+            let mut fes = self.shifted_comm.unwrap().to_field_elements()?;
+            output.append(&mut fes);
         }
         Ok(output)
     }

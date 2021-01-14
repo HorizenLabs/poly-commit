@@ -6,6 +6,9 @@ pub mod poseidon;
 /// Implementation of FiatShamirRng using a ChaChaRng
 pub mod chacha;
 
+/// Gadgets to enforce FiatShamirRng on R1CS circuits
+pub mod constraints;
+
 /// the trait for Fiat-Shamir RNG
 pub trait FiatShamirRng<F: PrimeField, ConstraintF: PrimeField> {
     /// initialize the RNG
