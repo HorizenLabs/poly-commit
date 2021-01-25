@@ -187,9 +187,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         supported_degree: usize,
         p: &LabeledPolynomial<G::ScalarField>,
     ) -> Result<(), Error> {
-        if p.degree() < 1 {
-            return Err(Error::DegreeIsZero);
-        } else if p.degree() > supported_degree {
+        if p.degree() > supported_degree {
             return Err(Error::TooManyCoefficients {
                 num_coefficients: p.degree() + 1,
                 num_powers: supported_degree + 1,
@@ -1084,6 +1082,12 @@ mod tests {
 
     type PC<E, D> = InnerProductArgPC<E, D>;
     type PC_DEE = PC<Affine, Blake2s>;
+
+    #[test]
+    fn constant_poly_test() {
+        use crate::tests::*;
+        constant_poly_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
+    }
 
     #[test]
     fn single_poly_test() {

@@ -755,8 +755,11 @@ pub mod tests {
         let pp = PC::setup(max_degree, rng)?;
 
         for _ in 0..num_iters {
-            let supported_degree = supported_degree
-                .unwrap_or(rand::distributions::Uniform::from(1..=max_degree).sample(rng));
+            let supported_degree = match supported_degree {
+                Some(0) => 0,
+                Some(d) => d,
+                None => rand::distributions::Uniform::from(1..=max_degree).sample(rng)
+            };
             assert!(
                 max_degree >= supported_degree,
                 "max_degree < supported_degree"
@@ -777,7 +780,11 @@ pub mod tests {
             for i in 0..num_polynomials {
                 let label = format!("Test{}", i);
                 labels.push(label.clone());
-                let degree = rand::distributions::Uniform::from(1..=supported_degree).sample(rng);
+                let degree = if supported_degree > 0 {
+                    rand::distributions::Uniform::from(1..=supported_degree).sample(rng)
+                } else {
+                    0
+                };
                 let poly = Polynomial::rand(degree, rng);
 
                 let degree_bound = if let Some(degree_bounds) = &mut degree_bounds {
@@ -1040,6 +1047,23 @@ pub mod tests {
             );
         }
         Ok(())
+    }
+
+    pub fn constant_poly_test<F, PC>() -> Result<(), PC::Error>
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
+    {
+        let info = TestInfo {
+            num_iters: 100,
+            max_degree: None,
+            supported_degree: Some(0),
+            num_polynomials: 1,
+            enforce_degree_bounds: false,
+            max_num_queries: 1,
+            ..Default::default()
+        };
+        test_template::<F, PC>(info)
     }
 
     pub fn single_poly_test<F, PC>() -> Result<(), PC::Error>
