@@ -192,9 +192,7 @@ impl<
         supported_degree: usize,
         p: &LabeledPolynomial<G::ScalarField>,
     ) -> Result<(), Error> {
-        if p.degree() < 1 {
-            return Err(Error::DegreeIsZero);
-        } else if p.degree() > supported_degree {
+        if p.degree() > supported_degree {
             return Err(Error::TooManyCoefficients {
                 num_coefficients: p.degree() + 1,
                 num_powers: supported_degree + 1,
@@ -1110,6 +1108,12 @@ mod tests {
 
     type PC<F, G, FS> = InnerProductArgPC<F, G, FS>;
     type PC_BN382 = PC<Fr, Affine, BN382FrPoseidonSponge>;
+
+    #[test]
+    fn constant_poly_test() {
+        use crate::tests::*;
+        constant_poly_test::<_, PC_BN382, Blake2s>().expect("test failed for tweedle_dee-blake2s");
+    }
 
     #[test]
     fn single_poly_test() {
