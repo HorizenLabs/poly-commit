@@ -9,12 +9,9 @@ use r1cs_std::bits::{
     uint8::UInt8, boolean::Boolean
 };
 
-// TODO: In our application we won't absorb non-native field elements but import bit representation
-//       of them as public input. In the other field, we will enforce the uniqueness of that
-//       representation. That's why, at the moment, we output the elements of the other field as
-//       Boolean vectors. In the future, if needed, it may be worth considering to have a non-native
-//       field element representation in the SNARK circuit (a gadget) that handles all the boiler
-//       plate and provides more flexibility. This is already implemented in arkworks/nonnative.
+// TODO: In the future, we will have a non-native field element representation in the SNARK circuit
+//       (a gadget) that handles all the boiler plate and provides more flexibility. This is already
+//       implemented in arkworks/nonnative.
 
 /// the trait for Fiat-Shamir RNG
 pub trait FiatShamirRngGadget<F: PrimeField, ConstraintF: PrimeField, FS: FiatShamirRng<F, ConstraintF>>: Sized {
@@ -22,12 +19,12 @@ pub trait FiatShamirRngGadget<F: PrimeField, ConstraintF: PrimeField, FS: FiatSh
     /// initialize the RNG
     fn new<CS: ConstraintSystem<ConstraintF>>(cs: CS) -> Result<Self, SynthesisError>;
 
-    /*/// take in field elements
+    /// take in field elements
     fn enforce_absorb_nonnative_field_elements<CS: ConstraintSystem<ConstraintF>>(
         &mut self,
         cs: CS,
         elems: &[F]
-    ) -> Result<(), SynthesisError>;*/
+    ) -> Result<(), SynthesisError>;
 
     /// take in field elements
     fn enforce_absorb_native_field_elements<
@@ -85,6 +82,7 @@ pub(crate) mod test {
         FS:  FiatShamirRng<F, ConstraintF>,
         FSG: FiatShamirRngGadget<F, ConstraintF, FS>,
     >(
+        non_native_inputs: Vec<F>,
         native_inputs: Vec<ConstraintF>,
         byte_inputs: &[u8],
     )
@@ -94,6 +92,33 @@ pub(crate) mod test {
         };
 
         let mut cs = TestConstraintSystem::<ConstraintF>::new();
+
+        // Non Native inputs
+        let mut fs_rng = FS::new();
+        fs_rng.absorb_nonnative_field_elements(non_native_inputs.as_slice());
+
+        let mut fs_rng_g = FSG::new(cs.ns(|| "new fs_rng_g for non native inputs")).unwrap();
+        fs_rng_g.enforce_absorb_nonnative_field_elements(
+            cs.ns(|| "enforce absorb non native field elements"), non_native_inputs.as_slice()
+        ).unwrap();
+        assert_eq!(
+            (
+                fs_rng.squeeze_nonnative_field_elements(1)[0].write_bits(),
+                fs_rng.squeeze_native_field_elements(1)[0],
+                fs_rng.squeeze_128_bits_nonnative_field_elements(1)[0].write_bits(),
+            ),
+            (
+                gadget_to_primitive(fs_rng_g.enforce_squeeze_nonnative_field_elements(
+                    cs.ns(||"squeeze non native given non native absorb"), 1
+                ).unwrap()[0].clone()),
+                fs_rng_g.enforce_squeeze_native_field_elements(
+                    cs.ns(|| "squeeze native given non native absorb"), 1
+                ).unwrap()[0].value.unwrap(),
+                gadget_to_primitive(fs_rng_g.enforce_squeeze_128_bits_nonnative_field_elements(
+                    cs.ns(|| "squeeze 128 bits given non native absorb"), 1
+                ).unwrap()[0].clone()),
+            )
+        );
 
         // Native inputs
         let mut fs_rng = FS::new();

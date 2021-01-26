@@ -64,7 +64,7 @@ impl<G: AffineCurve, FS: FiatShamirRng<G::ScalarField, <G::BaseField as Field>::
 
     fn compute_random_oracle_challenge(bytes: &[u8], fs_rng: &mut FS) -> G::ScalarField {
         fs_rng.absorb_bytes(bytes);
-        fs_rng.squeeze_nonnative_field_elements(1)[0]
+        fs_rng.squeeze_128_bits_nonnative_field_elements(1)[0]
     }
 
     #[inline]
@@ -1090,10 +1090,10 @@ mod tests {
         }
     };
     use blake2::Blake2s;
-    use primitives::crh::poseidon::bn382::BN382FrPoseidonHash;
+    use primitives::crh::poseidon::bn382::BN382FrPoseidonSponge;
 
     type PC<E, FS> = InnerProductArgPC<E, FS>;
-    type PC_BN382 = PC<Affine, BN382FrPoseidonHash>;
+    type PC_BN382 = PC<Affine, BN382FrPoseidonSponge>;
 
     #[test]
     fn single_poly_test() {

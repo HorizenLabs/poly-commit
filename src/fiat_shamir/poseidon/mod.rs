@@ -1,16 +1,11 @@
 use algebra::{PrimeField, ToConstraintField, FpParameters};
-use primitives::{PoseidonParameters, PoseidonSBox, PoseidonHash, AlgebraicSponge};
+use primitives::{PoseidonParameters, PoseidonSBox, PoseidonSponge, AlgebraicSponge};
 use crate::fiat_shamir::FiatShamirRng;
 
 /// PoseidonHashGadget-backed implementation of FiatShamirRngGadget
 pub mod constraints;
 
-//TODO: This primitive might be slightly sped-up by working at byte level instead of bit level;
-//      However, we need some extra care and new gadgets in the circuit (like a FromBytes gadget)
-//      and I'm worried that the bytes corresponding to REPR_SHAVE_BITS (that will be all 0),
-//      might affect security (maybe not).
-//      Still, in terms of number of constraints, working on bit level is slightly cheaper.
-impl<F, ConstraintF, P, SB> FiatShamirRng<F, ConstraintF> for PoseidonHash<ConstraintF, P, SB>
+impl<F, ConstraintF, P, SB> FiatShamirRng<F, ConstraintF> for PoseidonSponge<ConstraintF, P, SB>
 where
     F: PrimeField,
     ConstraintF: PrimeField,
@@ -123,35 +118,35 @@ mod test {
                 fq::Fq, fr::Fr,
             }
         };
-        use primitives::crh::poseidon::parameters::bn382::BN382FrPoseidonHash;
+        use primitives::crh::poseidon::parameters::bn382::BN382FrPoseidonSponge;
 
         let rng = &mut ChaCha20Rng::from_seed([
             1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2]);
         let non_native_inputs = vec![Fq::rand(rng); 5];
         let native_inputs = vec![Fr::rand(rng); 5];
         let byte_inputs = "TEST_FS_RNG_WITH_BN_382".as_bytes();
-        test_absorb_squeeze_vals::<Fq, _, BN382FrPoseidonHash>(
+        test_absorb_squeeze_vals::<Fq, _, BN382FrPoseidonSponge>(
             non_native_inputs,
             native_inputs,
             byte_inputs,
 
             (
-                Fq::new(BigInteger384([12016618990178755936, 113170861864162129, 4879244684047526131, 7536486198472387696, 3005199297160601854, 578436848701623138])),
-                Fr::new(BigInteger384([14108808286947537994, 438659023141181977, 12200179818727041293, 17425304848456118616, 1469018988105606060, 185938356707883218])),
-                Fq::new(BigInteger384([3750802089028588180, 3878171735908549370, 15753965755587790825, 1437313415694079221, 8105394497193498031, 2091707477236339369])),
+                Fq::new(BigInteger384([2895660242738789017, 8512201728826116984, 10846410857391028522, 1177847072281288486, 1176675876650363556, 117059997667922578])),
+                Fr::new(BigInteger384([7139029093582782450, 5122260996318787352, 11817825065862403011, 11032640916939218134, 3507534247076097382, 888689454973592979])),
+                Fq::new(BigInteger384([18325121246728684406, 10073074744960290716, 5181761558013828819, 16377396632814968485, 12827244535173952658, 401369050975199809])),
             ),
             (
                 Fq::new(BigInteger384([9349821909120850162, 2583893546482351157, 11318221738885769420, 5586224527060837185, 18384939629932888033, 1927801529777188223])),
-                Fr::new(BigInteger384([12421529125307652624, 12189242976828362088, 15552638547580932756, 2943385393865250656, 2422254917648279048, 910156443955058421])),
-                Fq::new(BigInteger384([883559833201629700, 2297720271747027573, 10293539329733317053, 11843502315766683749, 9971289791846452217, 2129217580708431512])),
+                Fr::new(BigInteger384([7197609493738603709, 16793498479102870848, 12116352465778914752, 7555252794275463479, 15762501231817493649, 1559517585302804411])),
+                Fq::new(BigInteger384([9404725472876462018, 17370287534333024298, 15862891673946816230, 9736815574430304622, 7197275726412521400, 1379329904283317430])),
             ),
             (
                 Fq::new(BigInteger384([1802634151726318859, 8932725432101101824, 17438325308273051863, 9195168340551825907, 8660026696007698207, 737597761618078455])),
-                Fr::new(BigInteger384([2254176659747291193, 10909760097727274831, 1525194543008054803, 16228547171091262680, 2057160796565236781, 2328269622461191271])),
-                Fq::new(BigInteger384([11397267253093576887, 353312307280226882, 5804830282428411167, 12502402992812411140, 3473442075068307199, 700133953511294972])),
+                Fr::new(BigInteger384([17327961317228976599, 14920233244743080316, 11337553424800437501, 10467062516926635978, 8332404348717572274, 967231975056851993])),
+                Fq::new(BigInteger384([7927511781575854671, 13993118231894507329, 14686499907236610645, 10872235923201052429, 13401804413947996421, 1377617888218943465])),
             )
         );
 
-        test_squeeze_consistency::<Fq, _, BN382FrPoseidonHash>();
+        test_squeeze_consistency::<Fq, _, BN382FrPoseidonSponge>();
     }
 }

@@ -2,8 +2,8 @@ use crate::fiat_shamir::constraints::FiatShamirRngGadget;
 use algebra::{
     PrimeField, FpParameters
 };
-use primitives::{PoseidonHash, PoseidonParameters, PoseidonSBox};
-use r1cs_crypto::{SBoxGadget, PoseidonHashGadget, AlgebraicSpongeGadget};
+use primitives::{PoseidonSponge, PoseidonParameters, PoseidonSBox};
+use r1cs_crypto::{SBoxGadget, PoseidonSpongeGadget, AlgebraicSpongeGadget};
 use r1cs_core::{ConstraintSystem, SynthesisError};
 use r1cs_std::{
     fields::fp::FpGadget,
@@ -13,7 +13,8 @@ use r1cs_std::{
     },
 };
 
-impl<F, ConstraintF, P, SB, SBG> FiatShamirRngGadget<F, ConstraintF, PoseidonHash<ConstraintF, P, SB>> for PoseidonHashGadget<ConstraintF, P, SB, SBG>
+impl<F, ConstraintF, P, SB, SBG> FiatShamirRngGadget<F, ConstraintF, PoseidonSponge<ConstraintF, P, SB>>
+for PoseidonSpongeGadget<ConstraintF, P, SB, SBG>
     where
         F: PrimeField,
         ConstraintF: PrimeField,
@@ -22,10 +23,10 @@ impl<F, ConstraintF, P, SB, SBG> FiatShamirRngGadget<F, ConstraintF, PoseidonHas
         SBG: SBoxGadget<ConstraintF, SB>
 {
     fn new<CS: ConstraintSystem<ConstraintF>>(cs: CS) -> Result<Self, SynthesisError> {
-        <Self as AlgebraicSpongeGadget<PoseidonHash<ConstraintF, P, SB>, ConstraintF>>::new(cs)
+        <Self as AlgebraicSpongeGadget<PoseidonSponge<ConstraintF, P, SB>, ConstraintF>>::new(cs)
     }
 
-    /*fn enforce_absorb_nonnative_field_elements<CS: ConstraintSystem<ConstraintF>>(
+    fn enforce_absorb_nonnative_field_elements<CS: ConstraintSystem<ConstraintF>>(
         &mut self,
         mut cs: CS,
         elems: &[F]
@@ -38,11 +39,11 @@ impl<F, ConstraintF, P, SB, SBG> FiatShamirRngGadget<F, ConstraintF, PoseidonHas
             .collect();
 
         // Allocate bits as witnesses
-        let elems_bits_gadget = Vec::<Boolean>::alloc(
+        // TODO: Is this fine for now ?
+        let elems_bits_gadget = Boolean::alloc_input_vec(
             cs.ns(|| "alloc non-native bits"),
-            || Ok(elems_bits)
+            elems_bits.as_slice()
         )?;
-        // PROBLEM: NOT BINDED TO ANYTHING !!
 
         // Enforce packing (safely) bits into native field element gadgets
         let mut native_fe_gadgets = Vec::new();
@@ -58,7 +59,7 @@ impl<F, ConstraintF, P, SB, SBG> FiatShamirRngGadget<F, ConstraintF, PoseidonHas
         self.enforce_absorb(cs.ns(|| "absorb new native fes"), native_fe_gadgets.as_slice())?;
 
         Ok(())
-    }*/
+    }
 
     fn enforce_absorb_native_field_elements<
         CS: ConstraintSystem<ConstraintF>,
@@ -165,7 +166,7 @@ impl<F, ConstraintF, P, SB, SBG> FiatShamirRngGadget<F, ConstraintF, PoseidonHas
 
         // Enforce squeezing the required number of field elements
         let outputs_bits =
-            <Self as FiatShamirRngGadget<F, ConstraintF, PoseidonHash<ConstraintF, P, SB>>>::enforce_squeeze_nonnative_field_elements(
+            <Self as FiatShamirRngGadget<F, ConstraintF, PoseidonSponge<ConstraintF, P, SB>>>::enforce_squeeze_nonnative_field_elements(
                 self,
                 cs.ns(|| "squeeze_required non_native_fes"),
                 to_squeeze
@@ -196,18 +197,19 @@ mod test {
         use algebra::fields::bn_382::{
             fq::Fq, fr::Fr
         };
-        use primitives::crh::poseidon::parameters::bn382::BN382FrPoseidonHash;
-        use r1cs_crypto::crh::poseidon::bn382::BN382FrPoseidonHashGadget;
+        use primitives::crh::poseidon::parameters::bn382::BN382FrPoseidonSponge;
+        use r1cs_crypto::crh::poseidon::bn382::BN382FrPoseidonSpongeGadget;
 
         let rng = &mut thread_rng();
 
         for _ in 0..100 {
+            let non_native_inputs = vec![Fq::rand(rng); 5];
             let native_inputs = vec![Fr::rand(rng); 5];
             let mut byte_inputs = vec![0u8; 100];
             rng.fill_bytes(&mut byte_inputs);
 
-            test_native_result::<Fq, Fr, BN382FrPoseidonHash, BN382FrPoseidonHashGadget>(
-                native_inputs, &byte_inputs
+            test_native_result::<Fq, Fr, BN382FrPoseidonSponge, BN382FrPoseidonSpongeGadget>(
+                non_native_inputs, native_inputs, &byte_inputs
             );
         }
     }
