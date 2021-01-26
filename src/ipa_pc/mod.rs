@@ -4,7 +4,7 @@ use crate::{LabeledCommitment, LabeledPolynomial, LinearCombination};
 use crate::{PCCommitterKey, PCRandomness, PCUniversalParams, Polynomial, PolynomialCommitment};
 
 use algebra_utils::msm::VariableBaseMSM;
-use algebra::{ToBytes, to_bytes, Field, PrimeField, UniformRand, Group, AffineCurve, ProjectiveCurve};
+use algebra::{ToBytes, to_bytes, Field, PrimeField, UniformRand, Group, AffineCurve, ProjectiveCurve, ToConstraintField};
 use std::{format, vec};
 use std::{convert::TryInto, marker::PhantomData};
 use rand_core::RngCore;
@@ -33,12 +33,23 @@ use crate::fiat_shamir::FiatShamirRng;
 ///
 /// [pcdas]: https://eprint.iacr.org/2020/499
 /// [marlin]: https://eprint.iacr.org/2019/1047
-pub struct InnerProductArgPC<G: AffineCurve, FS: FiatShamirRng<G::ScalarField, <G::BaseField as Field>::BasePrimeField>> {
+pub struct InnerProductArgPC<
+    F: PrimeField,
+    G: AffineCurve<BaseField = F> + ToConstraintField<F>,
+    FS: FiatShamirRng<G::ScalarField, F>
+>
+{
+    _field:      PhantomData<F>,
     _projective: PhantomData<G>,
     _digest: PhantomData<FS>,
 }
 
-impl<G: AffineCurve, FS: FiatShamirRng<G::ScalarField, <G::BaseField as Field>::BasePrimeField>> InnerProductArgPC<G, FS> {
+impl<
+    F: PrimeField,
+    G: AffineCurve<BaseField = F> + ToConstraintField<F>,
+    FS: FiatShamirRng<G::ScalarField, F>
+> InnerProductArgPC<F, G, FS>
+{
     /// `PROTOCOL_NAME` is used as a seed for the setup function.
     pub const PROTOCOL_NAME: &'static [u8] = b"PC-DL-2020";
 
@@ -62,11 +73,6 @@ impl<G: AffineCurve, FS: FiatShamirRng<G::ScalarField, <G::BaseField as Field>::
         comm
     }
 
-    fn compute_random_oracle_challenge(bytes: &[u8], fs_rng: &mut FS) -> G::ScalarField {
-        fs_rng.absorb_bytes(bytes);
-        fs_rng.squeeze_128_bits_nonnative_field_elements(1)[0]
-    }
-
     #[inline]
     fn inner_product(l: &[G::ScalarField], r: &[G::ScalarField]) -> G::ScalarField {
         l.par_iter().zip(r).map(|(li, ri)| *li * ri).sum()
@@ -81,9 +87,10 @@ impl<G: AffineCurve, FS: FiatShamirRng<G::ScalarField, <G::BaseField as Field>::
         values: impl IntoIterator<Item = G::ScalarField>,
         proof: &Proof<G>,
         opening_challenges: &dyn Fn(u64) -> G::ScalarField,
+        ro: &mut FS,
     ) -> Option<SuccinctCheckPolynomial<G::ScalarField>> {
         let check_time = start_timer!(|| "Succinct checking");
-
+        let fs_rng = ro;
         let d = vk.supported_degree();
 
         // `log_d` is ceil(log2 (d + 1)), which is the number of steps to compute all of the challenges
@@ -125,24 +132,23 @@ impl<G: AffineCurve, FS: FiatShamirRng<G::ScalarField, <G::BaseField as Field>::
         if proof.hiding_comm.is_some() {
             let hiding_comm = proof.hiding_comm.unwrap();
             let rand = proof.rand.unwrap();
-            let mut fs_rng = FS::new();
 
-            let hiding_challenge = Self::compute_random_oracle_challenge(
-                &to_bytes![combined_commitment, point, combined_v, hiding_comm].unwrap(),
-                &mut fs_rng
-            );
+            let hiding_challenge = {
+                fs_rng.absorb_nonnative_field_elements(&[point, combined_v]);
+                fs_rng.absorb_native_field_elements(&[combined_commitment, hiding_comm]);
+                fs_rng.squeeze_128_bits_nonnative_field_elements(1)[0]
+            };
             combined_commitment_proj += &(hiding_comm.mul(hiding_challenge) - &vk.s.mul(rand));
             combined_commitment = combined_commitment_proj.into_affine();
         }
 
-        let mut fs_rng = FS::new();
-
         // Challenge for each round
         let mut round_challenges = Vec::with_capacity(log_d);
-        let mut round_challenge = Self::compute_random_oracle_challenge(
-            &to_bytes![combined_commitment, point, combined_v].unwrap(),
-            &mut fs_rng
-        );
+        let mut round_challenge = {
+            fs_rng.absorb_native_field_elements(&[combined_commitment]);
+            fs_rng.absorb_nonnative_field_elements(&[point, combined_v]);
+            fs_rng.squeeze_128_bits_nonnative_field_elements(1)[0]
+        };
 
         let h_prime = vk.h.mul(round_challenge);
 
@@ -152,10 +158,11 @@ impl<G: AffineCurve, FS: FiatShamirRng<G::ScalarField, <G::BaseField as Field>::
         let r_iter = proof.r_vec.iter();
 
         for (l, r) in l_iter.zip(r_iter) {
-            round_challenge = Self::compute_random_oracle_challenge(
-                &to_bytes![round_challenge, l, r].unwrap(),
-                &mut fs_rng
-            );
+            round_challenge = {
+                fs_rng.absorb_nonnative_field_elements(&[round_challenge]);
+                fs_rng.absorb_native_field_elements(&[l.clone(), r.clone()]);
+                fs_rng.squeeze_128_bits_nonnative_field_elements(1)[0]
+            };
             round_challenges.push(round_challenge);
             round_commitment_proj +=
                 &(l.mul(round_challenge.inverse().unwrap()) + &r.mul(round_challenge));
@@ -355,10 +362,11 @@ impl<G: AffineCurve, FS: FiatShamirRng<G::ScalarField, <G::BaseField as Field>::
     }
 }
 
-impl<G, FS> PolynomialCommitment<G::ScalarField> for InnerProductArgPC<G, FS>
-where
-    G: AffineCurve,
-    FS: FiatShamirRng<G::ScalarField, <G::BaseField as Field>::BasePrimeField>
+impl<
+    F: PrimeField,
+    G: AffineCurve<BaseField = F> + ToConstraintField<F>,
+    FS: FiatShamirRng<G::ScalarField, F>
+> PolynomialCommitment<G> for InnerProductArgPC<F, G, FS>
 {
     type UniversalParams = UniversalParams<G>;
     type CommitterKey = CommitterKey<G>;
@@ -367,6 +375,7 @@ where
     type Commitment = Commitment<G>;
     type PreparedCommitment = PreparedCommitment<G>;
     type Randomness = Randomness<G>;
+    type RandomOracle = FS;
     type Proof = Proof<G>;
     type BatchProof = Vec<Self::Proof>;
     type Error = Error;
@@ -506,11 +515,13 @@ where
         opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rands: impl IntoIterator<Item = &'a Self::Randomness>,
         rng: Option<&mut dyn RngCore>,
+        ro: &mut Self::RandomOracle,
     ) -> Result<Self::Proof, Self::Error>
     where
         Self::Commitment: 'a,
         Self::Randomness: 'a,
     {
+        let fs_rng = ro;
         let mut combined_polynomial = Polynomial::zero();
         let mut combined_rand = G::ScalarField::zero();
         let mut combined_commitment_proj = <G::Projective as ProjectiveCurve>::zero();
@@ -618,17 +629,11 @@ where
             hiding_commitment = Some(batch.pop().unwrap());
             combined_commitment = batch.pop().unwrap();
 
-            let mut fs_rng = FS::new();
-            let hiding_challenge = Self::compute_random_oracle_challenge(
-                &to_bytes![
-                    combined_commitment,
-                    point,
-                    combined_v,
-                    hiding_commitment.unwrap()
-                ]
-                .unwrap(),
-                &mut fs_rng
-            );
+            let hiding_challenge = {
+                fs_rng.absorb_nonnative_field_elements(&[point, combined_v]);
+                fs_rng.absorb_native_field_elements(&[combined_commitment, hiding_commitment.unwrap()]);
+                fs_rng.squeeze_128_bits_nonnative_field_elements(1)[0]
+            };
             combined_polynomial += (hiding_challenge, &hiding_polynomial);
             combined_rand += &(hiding_challenge * &hiding_rand);
             combined_commitment_proj +=
@@ -649,11 +654,11 @@ where
         combined_commitment = combined_commitment_proj.into_affine();
 
         // ith challenge
-        let mut fs_rng = FS::new();
-        let mut round_challenge = Self::compute_random_oracle_challenge(
-            &to_bytes![combined_commitment, point, combined_v].unwrap(),
-            &mut fs_rng
-        );
+        let mut round_challenge = {
+            fs_rng.absorb_native_field_elements(&[combined_commitment]);
+            fs_rng.absorb_nonnative_field_elements(&[point, combined_v]);
+            fs_rng.squeeze_128_bits_nonnative_field_elements(1)[0]
+        };
 
         let h_prime = ck.h.mul(round_challenge).into_affine();
 
@@ -705,10 +710,12 @@ where
             l_vec.push(lr[0]);
             r_vec.push(lr[1]);
 
-            round_challenge = Self::compute_random_oracle_challenge(
-                &to_bytes![round_challenge, lr[0], lr[1]].unwrap(),
-                &mut fs_rng
-            );
+            round_challenge = {
+                fs_rng.absorb_nonnative_field_elements(&[round_challenge]);
+                fs_rng.absorb_native_field_elements(&[lr[0], lr[1]]);
+                fs_rng.squeeze_128_bits_nonnative_field_elements(1)[0]
+            };
+
             let round_challenge_inv = round_challenge.inverse().unwrap();
 
             Self::polycommit_round_reduce(
@@ -752,6 +759,7 @@ where
         proof: &Self::Proof,
         opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         _rng: Option<&mut dyn RngCore>,
+        ro: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
     where
         Self::Commitment: 'a,
@@ -774,7 +782,7 @@ where
         }
 
         let check_poly =
-            Self::succinct_check(vk, commitments, point, values, proof, opening_challenges);
+            Self::succinct_check(vk, commitments, point, values, proof, opening_challenges, ro);
 
         if check_poly.is_none() {
             return Ok(false);
@@ -803,6 +811,7 @@ where
         proof: &Self::BatchProof,
         opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rng: &mut R,
+        ro: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
     where
         Self::Commitment: 'a,
@@ -851,6 +860,7 @@ where
                 vals.into_iter(),
                 p,
                 opening_challenges,
+                ro
             );
 
             if check_poly.is_none() {
@@ -891,7 +901,8 @@ where
         opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rands: impl IntoIterator<Item = &'a Self::Randomness>,
         rng: Option<&mut dyn RngCore>,
-    ) -> Result<BatchLCProof<G::ScalarField, Self>, Self::Error>
+        ro: &mut Self::RandomOracle,
+    ) -> Result<BatchLCProof<G, Self>, Self::Error>
     where
         Self::Randomness: 'a,
         Self::Commitment: 'a,
@@ -985,6 +996,7 @@ where
             opening_challenges,
             lc_randomness.iter(),
             rng,
+            ro
         )?;
         Ok(BatchLCProof { proof, evals: None })
     }
@@ -997,9 +1009,10 @@ where
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<G::ScalarField>,
         evaluations: &Evaluations<G::ScalarField>,
-        proof: &BatchLCProof<G::ScalarField, Self>,
+        proof: &BatchLCProof<G, Self>,
         opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rng: &mut R,
+        ro: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
     where
         Self::Commitment: 'a,
@@ -1073,6 +1086,7 @@ where
             proof,
             opening_challenges,
             rng,
+            ro
         )
     }
 }
@@ -1084,7 +1098,9 @@ mod tests {
     use super::InnerProductArgPC;
 
     use algebra::{
-        fields::bn_382::Fq,
+        fields::bn_382::{
+            Fq, Fr
+        },
         curves::bn_382::g::{
             Affine, Projective,
         }
@@ -1092,8 +1108,8 @@ mod tests {
     use blake2::Blake2s;
     use primitives::crh::poseidon::bn382::BN382FrPoseidonSponge;
 
-    type PC<E, FS> = InnerProductArgPC<E, FS>;
-    type PC_BN382 = PC<Affine, BN382FrPoseidonSponge>;
+    type PC<F, G, FS> = InnerProductArgPC<F, G, FS>;
+    type PC_BN382 = PC<Fr, Affine, BN382FrPoseidonSponge>;
 
     #[test]
     fn single_poly_test() {
