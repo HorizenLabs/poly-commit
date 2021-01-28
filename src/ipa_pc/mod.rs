@@ -18,6 +18,7 @@ use rayon::prelude::*;
 use algebra_kernels::polycommit::{get_kernels, get_gpu_min_length};
 
 use digest::Digest;
+use algebra_utils::DensePolynomial;
 
 /// A polynomial commitment scheme based on the hardness of the
 /// discrete logarithm problem in prime-order groups.
@@ -303,6 +304,152 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
         G::Projective::batch_normalization_into_affine(generators)
     }
+
+    // "Naive approach" (if it can be useful)
+    // Assumption: the succinct check for each of the proof has been done outside,
+    // the h_poly for each of them is computed by using the xi_s, and all of them
+    // along with the g_finals are collected and passed to this function (memory heavy)
+    pub(crate) fn naive_batch_verify_dlog_hard_part<'a, R: RngCore>(
+        vk_gens: Vec<G>,
+        h_polys: impl IntoIterator<Item = &'a DensePolynomial<G::ScalarField>>,
+        g_finals: impl IntoIterator<Item = &'a G>,
+        rng: &mut R,
+    ) -> Result<bool, Error>
+    {
+        unimplemented!();
+    }
+
+    // "Memory optimized - final version" approach
+    // Assumption: the succinct check for each of the proof has been done outside,
+    // and all the xi_s vectors and the g_finals are collected and passed to this
+    // function (memory occupied by them is negligible).
+    // TODO: Can we achieve a higher degree of optimization by considering both
+    //       succinct check and dlog hard part ?
+    pub(crate) fn memory_optimized_batch_verify_dlog_hard_part<'a, R: RngCore>(
+        vk_gens: Vec<G>,
+        // The xi_s are collected in a struct called SuccinctCheckPolynomial; but
+        // the actual coefficients of the h polynomial, are obtained by calling
+        // the function compute_coeffs()
+        xi_s: impl IntoIterator<Item = &'a SuccinctCheckPolynomial<G::ScalarField>>,
+        g_finals: impl IntoIterator<Item = &'a G>,
+        rng: &mut R,
+    ) -> Result<bool, Error>
+    {
+        let lambda = G::ScalarField::rand(rng);
+
+        let mut batched_h_poly = DensePolynomial::from_coefficients_vec(vec![G::ScalarField::zero(); vk_gens.len()]);
+        let mut batched_g_fin = G::zero();
+        let mut lambda_i = G::ScalarField::one();
+
+        for (xi_s, g_fin) in xi_s.into_iter().zip(g_finals.into_iter())
+            {
+                // Compute the coefficients of the h_poly for the i-th proof
+                let mut h_poly_coeffs = xi_s.compute_coeffs();
+                assert!(h_poly_coeffs.len() <= vk_gens.len());
+
+                // Multiply h_poly coeffs for the i-th power of lambda
+                h_poly_coeffs.par_iter_mut(|coeff| *coeff *= lambda_i);
+
+                // Compute the h_poly itself
+                let mut h_poly = DensePolynomial::from_coefficients_vec(h_poly_coeffs);
+
+                // Add the i-th h_poly to the batched one
+                batched_h_poly += &h_poly;
+
+                // Multiply the i-th g_fin for the i-th power of lambda
+                let g_fin_times_lambda_i = g_fin.mul(lambda_i);
+
+                // Add the i-th g_fin to the batched one
+                batched_g_fin += g_fin_times_lambda_i;
+
+                // Compute next power of lambda
+                lambda_i *= lambda;
+            }
+
+        // Final MSM check
+        let expected_batched_g_fin = Self::cm_commit(
+            vk_gens.as_slice(),
+            batched_h_poly.coeffs.as_slice(),
+            None,
+            None,
+        );
+        if !ProjectiveCurve::is_zero(&(expected_batched_g_fin - &batched_g_fin.into_projective())) {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    /*
+    // "Memory optimized" approach. Has the succinct verifier inside.
+    // A little bit difficult to test and maybe not needed, unless you plan to do some
+    // specific optimizations involving the succinct verifier, or if you want to bench
+    // taking also into consideration the time for the succinct part. If you want it's here.
+    pub(crate) fn memory_optimized_batch_verify_dlog_hard_part<'a, R: RngCore>(
+        vk: &VerifierKey<G>,
+        commitments: impl IntoIterator<Item = &'a [LabeledCommitment<Commitment<G>>]>,
+        points: impl IntoIterator<Item = G::ScalarField>,
+        values: impl IntoIterator<Item = Vec<G::ScalarField>>,
+        proofs: impl IntoIterator<Item = &'a Proof<G>>,
+        opening_challenges: impl IntoIterator<Item = &'a dyn Fn(u64) -> G::ScalarField>,
+        ros: impl IntoIterator<Item = &'a mut FS>,
+        rng: &mut R,
+    ) -> Result<bool, Error>
+    {
+        let lambda = G::ScalarField::rand(&mut rng);
+
+        let mut batched_h_poly = DensePolynomial::from_coefficients_vec(vec![G::ScalarField::zero(); vk.max_degree + 1]);
+        let mut batched_g_fin = G::zero();
+        let mut lambda_i = G::ScalarField::one();
+
+        for (comms, (point, (values, (proof, (opening_challenges, (ro)))))) in commitments.into_iter()
+            .zip(points.into_iter())
+            .zip(values.into_iter())
+            .zip(proof.into_iter())
+            .zip(opening_challenges.into_iter())
+            .zip(ros.into_iter())
+        {
+            // Compute the xi_s for the i-th proof
+            let xi_s = Self::succinct_check(vk, comms, point, values, proof, opening_challenges, ro);
+            if xi_s.is_none() {
+                return Ok(false);
+            }
+
+            // Compute the coefficients of the h_poly for the i-th proof
+            // NOTE: Omit this step for "final version" approach and work directly on the xi_s
+            let mut h_poly_coeffs = xi_s.unwrap().compute_coeffs();
+            assert!(h_poly_coeffs.len() <= vk.max_degree + 1);
+
+            // Multiply h_poly coeffs for the i-th power of lambda
+            h_poly_coeffs.par_iter_mut(|coeff| *coeff *= lambda_i);
+
+            // Compute the h_poly itself
+            let mut h_poly = DensePolynomial::from_coefficients_vec(h_poly_coeffs);
+
+            // Add the i-th h_poly to the batched one
+            batched_h_poly += &h_poly;
+
+            // Multiply the i-th g_fin for the i-th power of lambda
+            let g_fin = proof.final_comm_key.mul(lambda_i);
+
+            // Add the i-th g_fin to the batched one
+            batched_g_fin += g_fin;
+
+            // Compute next power of lambda
+            lambda_i *= lambda;
+        }
+
+        // Final MSM check
+        let expected_batched_g_fin = Self::cm_commit(
+            vk.comm_key.as_slice(),
+            batched_h_poly.coeffs.as_slice(),
+            None,
+            None,
+        );
+        if !ProjectiveCurve::is_zero(&(expected_batched_g_fin - &batched_g_fin.into_projective())) {
+            return Ok(false);
+        }
+    }
+    */
 
     /// Perform bullet reduce at the commitment last stage
     fn polycommit_round_reduce(
