@@ -44,6 +44,10 @@ pub mod optional_rng;
 /// the seed based on new messages in the proof transcript.
 pub mod fiat_shamir;
 
+/// R1CS gadgets to enforce polynomial commitment verifications on an arithmetic
+/// circuit.
+pub mod constraints;
+
 /*/// The core [[KZG10]][kzg] construction.
 ///
 /// [kzg]: http://cacr.uwaterloo.ca/techreports/2010/cacr2010-10.pdf
@@ -123,7 +127,7 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
     type PreparedCommitment: PCPreparedCommitment<Self::Commitment>;
     /// The commitment randomness.
     type Randomness: PCRandomness;
-    /// The random oracle as a Sponge-based construction.
+    /// A FiatShamirRng, providing a source of random data used in the polynomial commitment checking.
     type RandomOracle: FiatShamirRng<G::ScalarField, <G::BaseField as Field>::BasePrimeField>;
     /// The evaluation proof for a single point.
     type Proof: PCProof + Clone;
