@@ -141,7 +141,9 @@ pub trait PolynomialCommitmentGadget<
     type PreparedLabeledCommitmentGadget: Clone;
 
     /// A FiatShamirRngGadget, providing a source of random data used in the polynomial commitment checking.
-    type RandomOracleGadget: FiatShamirRngGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>;
+    type RandomOracleGadget: FiatShamirRngGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>
+                             + ConstantGadget<PC::RandomOracle, <G::BaseField as Field>::BasePrimeField>
+                             + Clone;
 
     /// An allocated version of `PC::Proof`.
     type ProofGadget: AllocGadget<PC::Proof, <G::BaseField as Field>::BasePrimeField> + Clone;
