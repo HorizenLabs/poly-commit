@@ -20,7 +20,10 @@ use crate::fiat_shamir::constraints::FiatShamirRngGadget;
 /// Define the minimal interface of prepared allocated structures.
 pub trait PrepareGadget<Unprepared, ConstraintF: PrimeField>: Sized {
     /// Prepare from an unprepared element.
-    fn prepare(unprepared: &Unprepared) -> Result<Self, SynthesisError>;
+    fn prepare<CS: ConstraintSystem<ConstraintF>>(
+        cs: CS,
+        unprepared: &Unprepared
+    ) -> Result<Self, SynthesisError>;
 }
 
 /// A coefficient of `LinearCombination`.
