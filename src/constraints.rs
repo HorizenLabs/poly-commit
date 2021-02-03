@@ -174,7 +174,7 @@ pub trait PolynomialCommitmentGadget<
         query_set:                  &QuerySetGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>,
         evaluations:                &EvaluationsGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>,
         proof:                      &Self::BatchLCProofGadget,
-        fs_rng:             &mut Self::RandomOracleGadget,
+        fs_rng:                     &mut Self::RandomOracleGadget,
     ) -> Result<Boolean, SynthesisError>;
 
     /// Create the labeled commitment gadget from the commitment gadget

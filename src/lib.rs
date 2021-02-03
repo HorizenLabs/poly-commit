@@ -647,6 +647,24 @@ pub fn evaluate_query_set<'a, F: Field>(
     evaluations
 }
 
+/// Evaluate the given polynomials at `query_set` and returns a Vec<((poly_label, point_label), eval)>)
+pub fn evaluate_query_set_to_vec<'a, F: Field>(
+    polys: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
+    query_set: &QuerySet<'a, F>,
+) -> Vec<((String, String), F)>
+{
+    let polys = BTreeMap::from_iter(polys.into_iter().map(|p| (p.label(), p)));
+    let mut v = Vec::new();
+    for (label, (point_label, point)) in query_set {
+        let poly = polys
+            .get(label)
+            .expect("polynomial in evaluated lc is not found");
+        let eval = poly.evaluate(*point);
+        v.push(((label.clone(), point_label.clone()), eval));
+    }
+    v
+}
+
 fn lc_query_set_to_poly_query_set<'a, F: 'a + Field>(
     linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
     query_set: &QuerySet<F>,
