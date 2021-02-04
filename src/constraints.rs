@@ -1,5 +1,5 @@
 use crate::{
-    data_structures::LabeledCommitment, BatchLCProof, LCTerm, LinearCombination,
+    data_structures::LabeledCommitment, LCTerm, LinearCombination,
     PolynomialCommitment
 };
 use algebra::{PrimeField, AffineCurve, Field};
@@ -44,6 +44,15 @@ pub struct LinearCombinationGadget<SimulationF: PrimeField, ConstraintF: PrimeFi
     pub label: String,
     /// The linear combination of `(coeff, poly_label)` pairs.
     pub terms: Vec<(LinearCombinationCoeffGadget<SimulationF, ConstraintF>, LCTerm)>,
+}
+
+/// A proof of satisfaction of linear combinations.
+#[derive(Clone)]
+pub struct BatchLCProofGadget<G: AffineCurve, PC: PolynomialCommitment<G>, PCG: PolynomialCommitmentGadget<G, PC>> {
+    /// Evaluation proof.
+    pub proof: PCG::BatchProofGadget,
+    /// Evaluations required to verify the proof.
+    pub evals: Option<Vec<NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>>>,
 }
 
 impl<SimulationF: PrimeField, ConstraintF: PrimeField> AllocGadget<LinearCombination<SimulationF>, ConstraintF>
@@ -148,19 +157,18 @@ pub trait PolynomialCommitmentGadget<
     /// An allocated version of `PC::Proof`.
     type ProofGadget: AllocGadget<PC::Proof, <G::BaseField as Field>::BasePrimeField> + Clone;
 
-    /// An allocated version of `PC::BatchLCProof`.
-    type BatchLCProofGadget: AllocGadget<BatchLCProof<G, PC>, <G::BaseField as Field>::BasePrimeField>
-                             + Clone;
+    /// The evaluation proof for a query set.
+    type BatchProofGadget: AllocGadget<PC::BatchProof, <G::BaseField as Field>::BasePrimeField> + Clone;
 
-    /// Add to `CS` new constraints that check that `proof_i` is a valid evaluation proof
-    /// at `point_i` for the polynomial in `commitment_i`.
-    fn batch_check_evaluations<CS: ConstraintSystem<<G::BaseField as Field>::BasePrimeField>>(
+    /// Add to `CS` new constraints that check that `proof` is a valid evaluation proof
+    /// at points in `query_set` for the polynomials in `commitments`.
+    fn prepared_batch_check_individual_opening_challenges<CS: ConstraintSystem<<G::BaseField as Field>::BasePrimeField>>(
         cs:                 CS,
-        verification_key:   &Self::VerifierKeyGadget,
+        verification_key:   &Self::PreparedVerifierKeyGadget,
         commitments:        &[Self::LabeledCommitmentGadget],
         query_set:          &QuerySetGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>,
         evaluations:        &EvaluationsGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>,
-        proofs:             &[Self::ProofGadget],
+        proof:              &Self::BatchProofGadget,
         fs_rng:             &mut Self::RandomOracleGadget,
     ) -> Result<Boolean, SynthesisError>;
 
@@ -173,7 +181,7 @@ pub trait PolynomialCommitmentGadget<
         prepared_commitments:       &[Self::PreparedLabeledCommitmentGadget],
         query_set:                  &QuerySetGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>,
         evaluations:                &EvaluationsGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>,
-        proof:                      &Self::BatchLCProofGadget,
+        proof:                      &BatchLCProofGadget<G, PC, Self>,
         fs_rng:                     &mut Self::RandomOracleGadget,
     ) -> Result<Boolean, SynthesisError>;
 
