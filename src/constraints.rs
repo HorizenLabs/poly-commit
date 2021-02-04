@@ -198,6 +198,18 @@ pub trait PolynomialCommitmentGadget<
         commitment: Self::PreparedCommitmentGadget,
         degree_bound: Option<FpGadget<<G::BaseField as Field>::BasePrimeField>>,
     ) -> Self::PreparedLabeledCommitmentGadget;
+
+    /// Given the coordinates of a polynomial with respect to the Lagrange Basis
+    /// over a given FFT domain, enforce that the polynomial commits to an expected
+    /// value, using only the commitments of the Lagrange Basis.
+    /// This is an optimization coming from MinaProtocol: naive procedure would
+    /// require to enforce the interpolation of the polynomial from its evaluations,
+    /// and then enforce the commitment of its coefficients.
+    fn verify_polynomial_commitment_from_lagrange_representation(
+        expected_comm:       &Self::PreparedCommitmentGadget,
+        lagrange_poly_comms: &[PC::PreparedCommitment],
+        poly_coords:         &[NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>],
+    ) -> Result<(), SynthesisError>;
 }
 
 #[derive(Clone, Hash, PartialEq, Eq)]
