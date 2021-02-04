@@ -205,7 +205,8 @@ pub trait PolynomialCommitmentGadget<
     /// This is an optimization coming from MinaProtocol: naive procedure would
     /// require to enforce the interpolation of the polynomial from its evaluations,
     /// and then enforce the commitment of its coefficients.
-    fn verify_polynomial_commitment_from_lagrange_representation(
+    fn verify_polynomial_commitment_from_lagrange_representation<CS: ConstraintSystem<<G::BaseField as Field>::BasePrimeField>>(
+        cs:                  CS,
         expected_comm:       &Self::PreparedCommitmentGadget,
         lagrange_poly_comms: &[PC::PreparedCommitment],
         poly_coords:         &[NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>],
