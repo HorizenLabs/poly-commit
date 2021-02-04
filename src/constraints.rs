@@ -207,8 +207,8 @@ pub trait PolynomialCommitmentGadget<
     /// and then enforce the commitment of its coefficients.
     fn verify_polynomial_commitment_from_lagrange_representation<CS: ConstraintSystem<<G::BaseField as Field>::BasePrimeField>>(
         cs:                  CS,
-        expected_comm:       &Self::PreparedCommitmentGadget,
-        lagrange_poly_comms: &[PC::PreparedCommitment],
+        expected_comm:       &Self::CommitmentGadget,
+        lagrange_poly_comms: &[PC::Commitment],
         poly_coords:         &[NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>],
     ) -> Result<(), SynthesisError>;
 }
