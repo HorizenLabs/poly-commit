@@ -165,7 +165,7 @@ pub trait PolynomialCommitmentGadget<
     fn prepared_batch_check_individual_opening_challenges<CS: ConstraintSystem<<G::BaseField as Field>::BasePrimeField>>(
         cs:                 CS,
         verification_key:   &Self::PreparedVerifierKeyGadget,
-        commitments:        &[Self::LabeledCommitmentGadget],
+        commitments:        &[Self::PreparedLabeledCommitmentGadget],
         query_set:          &QuerySetGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>,
         evaluations:        &EvaluationsGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>,
         proof:              &Self::BatchProofGadget,
@@ -202,13 +202,13 @@ pub trait PolynomialCommitmentGadget<
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 /// A labeled point variable, for queries to a polynomial commitment.
-pub struct LabeledPointGadget<SimulationF: PrimeField, ConstraintF: PrimeField> {
+pub struct LabeledPointGadget<SimulationF: PrimeField, ConstraintF: PrimeField>(
     /// The label of the point.
     /// MUST be a unique identifier in a query set.
-    pub name: String,
+    pub String,
     /// The point value.
-    pub value: NonNativeFieldGadget<SimulationF, ConstraintF>,
-}
+    pub NonNativeFieldGadget<SimulationF, ConstraintF>
+);
 
 /// An allocated version of `QuerySet`.
 #[derive(Clone)]
@@ -229,10 +229,9 @@ impl<SimulationF: PrimeField, ConstraintF: PrimeField> EvaluationsGadget<Simulat
         lc_string: &str,
         point: &NonNativeFieldGadget<SimulationF, ConstraintF>,
     ) -> Result<NonNativeFieldGadget<SimulationF, ConstraintF>, SynthesisError> {
-        let key = LabeledPointGadget::<SimulationF, ConstraintF> {
-            name: String::from(lc_string),
-            value: point.clone(),
-        };
+        let key = LabeledPointGadget::<SimulationF, ConstraintF>(
+            String::from(lc_string), point.clone(),
+        );
         Ok(self.0.get(&key).map(|v| (*v).clone()).unwrap())
     }
 }
