@@ -86,11 +86,9 @@ impl<
         point: G::ScalarField,
         values: impl IntoIterator<Item = G::ScalarField>,
         proof: &Proof<G>,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         ro: &mut FS,
     ) -> Option<SuccinctCheckPolynomial<G::ScalarField>> {
         let check_time = start_timer!(|| "Succinct checking");
-        let fs_rng = ro;
         let d = vk.supported_degree();
 
         // `log_d` is ceil(log2 (d + 1)), which is the number of steps to compute all of the challenges
@@ -99,9 +97,7 @@ impl<
         let mut combined_commitment_proj = <G::Projective as ProjectiveCurve>::zero();
         let mut combined_v = G::ScalarField::zero();
 
-        let mut opening_challenge_counter = 0;
-        let mut cur_challenge = opening_challenges(opening_challenge_counter);
-        opening_challenge_counter += 1;
+        let mut cur_challenge = ro.squeeze_128_bits_nonnative_field_elements(1)[0];
 
         let labeled_commitments = commitments.into_iter();
         let values = values.into_iter();
@@ -110,8 +106,7 @@ impl<
             let commitment = labeled_commitment.commitment();
             combined_v += &(cur_challenge * &value);
             combined_commitment_proj += &labeled_commitment.commitment().comm.mul(cur_challenge);
-            cur_challenge = opening_challenges(opening_challenge_counter);
-            opening_challenge_counter += 1;
+            cur_challenge = ro.squeeze_128_bits_nonnative_field_elements(1)[0];
 
             let degree_bound = labeled_commitment.degree_bound();
             assert_eq!(degree_bound.is_some(), commitment.shifted_comm.is_some());
@@ -122,8 +117,7 @@ impl<
                 combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
             }
 
-            cur_challenge = opening_challenges(opening_challenge_counter);
-            opening_challenge_counter += 1;
+            cur_challenge = ro.squeeze_128_bits_nonnative_field_elements(1)[0];
         }
 
         let mut combined_commitment = combined_commitment_proj.into_affine();
@@ -134,9 +128,9 @@ impl<
             let rand = proof.rand.unwrap();
 
             let hiding_challenge = {
-                fs_rng.absorb_nonnative_field_elements(&[point, combined_v]);
-                fs_rng.absorb_native_field_elements(&[combined_commitment, hiding_comm]);
-                fs_rng.squeeze_128_bits_nonnative_field_elements(1)[0]
+                ro.absorb_nonnative_field_elements(&[point, combined_v]);
+                ro.absorb_native_field_elements(&[combined_commitment, hiding_comm]);
+                ro.squeeze_128_bits_nonnative_field_elements(1)[0]
             };
             combined_commitment_proj += &(hiding_comm.mul(hiding_challenge) - &vk.s.mul(rand));
             combined_commitment = combined_commitment_proj.into_affine();
@@ -145,9 +139,9 @@ impl<
         // Challenge for each round
         let mut round_challenges = Vec::with_capacity(log_d);
         let mut round_challenge = {
-            fs_rng.absorb_native_field_elements(&[combined_commitment]);
-            fs_rng.absorb_nonnative_field_elements(&[point, combined_v]);
-            fs_rng.squeeze_128_bits_nonnative_field_elements(1)[0]
+            ro.absorb_native_field_elements(&[combined_commitment]);
+            ro.absorb_nonnative_field_elements(&[point, combined_v]);
+            ro.squeeze_128_bits_nonnative_field_elements(1)[0]
         };
 
         let h_prime = vk.h.mul(round_challenge);
@@ -159,9 +153,9 @@ impl<
 
         for (l, r) in l_iter.zip(r_iter) {
             round_challenge = {
-                fs_rng.absorb_nonnative_field_elements(&[round_challenge]);
-                fs_rng.absorb_native_field_elements(&[l.clone(), r.clone()]);
-                fs_rng.squeeze_128_bits_nonnative_field_elements(1)[0]
+                ro.absorb_nonnative_field_elements(&[round_challenge]);
+                ro.absorb_native_field_elements(&[l.clone(), r.clone()]);
+                ro.squeeze_128_bits_nonnative_field_elements(1)[0]
             };
             round_challenges.push(round_challenge);
             round_commitment_proj +=
@@ -510,7 +504,6 @@ impl<
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         point: G::ScalarField,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rands: impl IntoIterator<Item = &'a Self::Randomness>,
         rng: Option<&mut dyn RngCore>,
         ro: &mut Self::RandomOracle,
@@ -519,7 +512,6 @@ impl<
         Self::Commitment: 'a,
         Self::Randomness: 'a,
     {
-        let fs_rng = ro;
         let mut combined_polynomial = Polynomial::zero();
         let mut combined_rand = G::ScalarField::zero();
         let mut combined_commitment_proj = <G::Projective as ProjectiveCurve>::zero();
@@ -532,9 +524,7 @@ impl<
 
         let combine_time = start_timer!(|| "Combining polynomials, randomness, and commitments.");
 
-        let mut opening_challenge_counter = 0;
-        let mut cur_challenge = opening_challenges(opening_challenge_counter);
-        opening_challenge_counter += 1;
+        let mut cur_challenge = ro.squeeze_128_bits_nonnative_field_elements(1)[0];
         for (labeled_polynomial, (labeled_commitment, randomness)) in
             polys_iter.zip(comms_iter.zip(rands_iter))
         {
@@ -555,8 +545,7 @@ impl<
                 combined_rand += &(cur_challenge * &randomness.rand);
             }
 
-            cur_challenge = opening_challenges(opening_challenge_counter);
-            opening_challenge_counter += 1;
+            cur_challenge = ro.squeeze_128_bits_nonnative_field_elements(1)[0];
 
             let has_degree_bound = degree_bound.is_some();
 
@@ -588,8 +577,7 @@ impl<
                     combined_rand += &(cur_challenge * &shifted_rand.unwrap());
                 }
             }
-            cur_challenge = opening_challenges(opening_challenge_counter);
-            opening_challenge_counter += 1;
+            cur_challenge = ro.squeeze_128_bits_nonnative_field_elements(1)[0];
         }
 
         end_timer!(combine_time);
@@ -628,9 +616,9 @@ impl<
             combined_commitment = batch.pop().unwrap();
 
             let hiding_challenge = {
-                fs_rng.absorb_nonnative_field_elements(&[point, combined_v]);
-                fs_rng.absorb_native_field_elements(&[combined_commitment, hiding_commitment.unwrap()]);
-                fs_rng.squeeze_128_bits_nonnative_field_elements(1)[0]
+                ro.absorb_nonnative_field_elements(&[point, combined_v]);
+                ro.absorb_native_field_elements(&[combined_commitment, hiding_commitment.unwrap()]);
+                ro.squeeze_128_bits_nonnative_field_elements(1)[0]
             };
             combined_polynomial += (hiding_challenge, &hiding_polynomial);
             combined_rand += &(hiding_challenge * &hiding_rand);
@@ -653,9 +641,9 @@ impl<
 
         // ith challenge
         let mut round_challenge = {
-            fs_rng.absorb_native_field_elements(&[combined_commitment]);
-            fs_rng.absorb_nonnative_field_elements(&[point, combined_v]);
-            fs_rng.squeeze_128_bits_nonnative_field_elements(1)[0]
+            ro.absorb_native_field_elements(&[combined_commitment]);
+            ro.absorb_nonnative_field_elements(&[point, combined_v]);
+            ro.squeeze_128_bits_nonnative_field_elements(1)[0]
         };
 
         let h_prime = ck.h.mul(round_challenge).into_affine();
@@ -709,9 +697,9 @@ impl<
             r_vec.push(lr[1]);
 
             round_challenge = {
-                fs_rng.absorb_nonnative_field_elements(&[round_challenge]);
-                fs_rng.absorb_native_field_elements(&[lr[0], lr[1]]);
-                fs_rng.squeeze_128_bits_nonnative_field_elements(1)[0]
+                ro.absorb_nonnative_field_elements(&[round_challenge]);
+                ro.absorb_native_field_elements(&[lr[0], lr[1]]);
+                ro.squeeze_128_bits_nonnative_field_elements(1)[0]
             };
 
             let round_challenge_inv = round_challenge.inverse().unwrap();
@@ -755,7 +743,6 @@ impl<
         point: G::ScalarField,
         values: impl IntoIterator<Item = G::ScalarField>,
         proof: &Self::Proof,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         _rng: Option<&mut dyn RngCore>,
         ro: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
@@ -780,7 +767,7 @@ impl<
         }
 
         let check_poly =
-            Self::succinct_check(vk, commitments, point, values, proof, opening_challenges, ro);
+            Self::succinct_check(vk, commitments, point, values, proof, ro);
 
         if check_poly.is_none() {
             return Ok(false);
@@ -807,7 +794,6 @@ impl<
         query_set: &QuerySet<G::ScalarField>,
         values: &Evaluations<G::ScalarField>,
         proof: &Self::BatchProof,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rng: &mut R,
         ro: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
@@ -857,7 +843,6 @@ impl<
                 *point,
                 vals.into_iter(),
                 p,
-                opening_challenges,
                 ro
             );
 
@@ -896,7 +881,6 @@ impl<
         polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<G::ScalarField>,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rands: impl IntoIterator<Item = &'a Self::Randomness>,
         rng: Option<&mut dyn RngCore>,
         ro: &mut Self::RandomOracle,
@@ -991,7 +975,6 @@ impl<
             lc_polynomials.iter(),
             lc_commitments.iter(),
             &query_set,
-            opening_challenges,
             lc_randomness.iter(),
             rng,
             ro
@@ -1008,7 +991,6 @@ impl<
         query_set: &QuerySet<G::ScalarField>,
         evaluations: &Evaluations<G::ScalarField>,
         proof: &BatchLCProof<G, Self>,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rng: &mut R,
         ro: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
@@ -1082,7 +1064,6 @@ impl<
             &query_set,
             &evaluations,
             proof,
-            opening_challenges,
             rng,
             ro
         )

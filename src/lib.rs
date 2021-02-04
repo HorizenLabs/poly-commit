@@ -180,7 +180,6 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         point: G::ScalarField,
-        opening_challenge: G::ScalarField,
         rands: impl IntoIterator<Item = &'a Self::Randomness>,
         rng: Option<&mut dyn RngCore>,
         ro: &mut Self::RandomOracle,
@@ -189,13 +188,11 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
         Self::Randomness: 'a,
         Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::open_individual_opening_challenges(
             ck,
             labeled_polynomials,
             commitments,
             point,
-            &opening_challenges,
             rands,
             rng,
             ro
@@ -209,7 +206,6 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<G::ScalarField>,
-        opening_challenge: G::ScalarField,
         rands: impl IntoIterator<Item = &'a Self::Randomness>,
         rng: Option<&mut dyn RngCore>,
         ro: &mut Self::RandomOracle,
@@ -218,13 +214,11 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
         Self::Randomness: 'a,
         Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::batch_open_individual_opening_challenges(
             ck,
             labeled_polynomials,
             commitments,
             query_set,
-            &opening_challenges,
             rands,
             rng,
             ro
@@ -239,21 +233,18 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
         point: G::ScalarField,
         values: impl IntoIterator<Item = G::ScalarField>,
         proof: &Self::Proof,
-        opening_challenge: G::ScalarField,
         rng: Option<&mut dyn RngCore>,
         ro: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
     where
         Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::check_individual_opening_challenges(
             vk,
             commitments,
             point,
             values,
             proof,
-            &opening_challenges,
             rng,
             ro,
         )
@@ -267,21 +258,18 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
         query_set: &QuerySet<G::ScalarField>,
         evaluations: &Evaluations<G::ScalarField>,
         proof: &Self::BatchProof,
-        opening_challenge: G::ScalarField,
         rng: &mut R,
         ro: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
     where
         Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::batch_check_individual_opening_challenges(
             vk,
             commitments,
             query_set,
             evaluations,
             proof,
-            &opening_challenges,
             rng,
             ro
         )
@@ -296,7 +284,6 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
         polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<G::ScalarField>,
-        opening_challenge: G::ScalarField,
         rands: impl IntoIterator<Item = &'a Self::Randomness>,
         rng: Option<&mut dyn RngCore>,
         ro: &mut Self::RandomOracle,
@@ -305,14 +292,12 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
         Self::Randomness: 'a,
         Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::open_combinations_individual_opening_challenges(
             ck,
             linear_combinations,
             polynomials,
             commitments,
             query_set,
-            &opening_challenges,
             rands,
             rng,
             ro
@@ -328,14 +313,12 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
         eqn_query_set: &QuerySet<G::ScalarField>,
         eqn_evaluations: &Evaluations<G::ScalarField>,
         proof: &BatchLCProof<G, Self>,
-        opening_challenge: G::ScalarField,
         rng: &mut R,
         ro: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
     where
         Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::check_combinations_individual_opening_challenges(
             vk,
             linear_combinations,
@@ -343,7 +326,6 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
             eqn_query_set,
             eqn_evaluations,
             proof,
-            &opening_challenges,
             rng,
             ro
         )
@@ -355,7 +337,6 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         point: G::ScalarField,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rands: impl IntoIterator<Item = &'a Self::Randomness>,
         rng: Option<&mut dyn RngCore>,
         ro: &mut Self::RandomOracle,
@@ -371,7 +352,6 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
         point: G::ScalarField,
         values: impl IntoIterator<Item = G::ScalarField>,
         proof: &Self::Proof,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rng: Option<&mut dyn RngCore>,
         ro: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
@@ -385,7 +365,6 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
         query_set: &QuerySet<G::ScalarField>,
         evaluations: &Evaluations<G::ScalarField>,
         proof: &Self::BatchProof,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rng: &mut R,
         ro: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
@@ -434,7 +413,6 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
                 *point,
                 values,
                 &proof,
-                opening_challenges,
                 Some(rng),
                 ro
             )?;
@@ -450,7 +428,6 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
         polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<G::ScalarField>,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rands: impl IntoIterator<Item = &'a Self::Randomness>,
         rng: Option<&mut dyn RngCore>,
         ro: &mut Self::RandomOracle,
@@ -469,7 +446,6 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
             polynomials,
             commitments,
             &poly_query_set,
-            opening_challenges,
             rands,
             rng,
             ro
@@ -488,7 +464,6 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
         eqn_query_set: &QuerySet<G::ScalarField>,
         eqn_evaluations: &Evaluations<G::ScalarField>,
         proof: &BatchLCProof<G, Self>,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rng: &mut R,
         ro: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
@@ -541,7 +516,6 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
             &poly_query_set,
             &poly_evals,
             proof,
-            opening_challenges,
             rng,
             ro
         )?;
@@ -559,7 +533,6 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<G::ScalarField>,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rands: impl IntoIterator<Item = &'a Self::Randomness>,
         rng: Option<&mut dyn RngCore>,
         ro: &mut Self::RandomOracle,
@@ -614,7 +587,6 @@ pub trait PolynomialCommitment<G: AffineCurve>: Sized {
                 query_polys,
                 query_comms,
                 *point,
-                opening_challenges,
                 query_rands,
                 Some(rng),
                 ro
@@ -766,14 +738,12 @@ pub mod tests {
             }
             println!("Generated query set");
 
-            let opening_challenge = G::ScalarField::rand(rng);
             let fs_rng = &mut PC::RandomOracle::new();
             let proof = PC::batch_open(
                 &ck,
                 &polynomials,
                 &comms,
                 &query_set,
-                opening_challenge,
                 &rands,
                 Some(rng),
                 fs_rng
@@ -785,7 +755,6 @@ pub mod tests {
                 &query_set,
                 &values,
                 &proof,
-                opening_challenge,
                 rng,
                 fs_rng
             )?;
@@ -904,14 +873,12 @@ pub mod tests {
             }
             println!("Generated query set");
 
-            let opening_challenge = G::ScalarField::rand(rng);
             let fs_rng = &mut PC::RandomOracle::new();
             let proof = PC::batch_open(
                 &ck,
                 &polynomials,
                 &comms,
                 &query_set,
-                opening_challenge,
                 &rands,
                 Some(rng),
                 fs_rng
@@ -923,7 +890,6 @@ pub mod tests {
                 &query_set,
                 &values,
                 &proof,
-                opening_challenge,
                 rng,
                 fs_rng
             )?;
@@ -1075,7 +1041,6 @@ pub mod tests {
             println!("Generated query set");
             println!("Linear combinations: {:?}", linear_combinations);
 
-            let opening_challenge = G::ScalarField::rand(rng);
             let fs_rng = &mut PC::RandomOracle::new();
             let proof = PC::open_combinations(
                 &ck,
@@ -1083,7 +1048,6 @@ pub mod tests {
                 &polynomials,
                 &comms,
                 &query_set,
-                opening_challenge,
                 &rands,
                 Some(rng),
                 fs_rng
@@ -1097,7 +1061,6 @@ pub mod tests {
                 &query_set,
                 &values,
                 &proof,
-                opening_challenge,
                 rng,
                 fs_rng
             )?;
