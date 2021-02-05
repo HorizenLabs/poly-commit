@@ -46,7 +46,7 @@ pub trait PCPreparedVerifierKey<Unprepared: PCVerifierKey> {
 
 /// Defines the minimal interface of commitments for any polynomial
 /// commitment scheme.
-pub trait PCCommitment: Clone + algebra::ToBytes {
+pub trait PCCommitment: Clone + algebra::ToBytes + std::fmt::Debug {
     /// Outputs a non-hiding commitment to the zero polynomial.
     fn empty() -> Self;
 
