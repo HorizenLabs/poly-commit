@@ -276,6 +276,22 @@ impl<G: AffineCurve> ToBytes for Proof<G> {
     }
 }
 
+/// For now, simply a vector of Proof<G>
+#[derive(Clone)]
+pub struct BatchProof<G: AffineCurve>(pub(crate) Vec<Proof<G>>);
+
+impl<G: AffineCurve> From<Vec<Proof<G>>> for BatchProof<G> {
+    fn from(other: Vec<Proof<G>>) -> Self {
+        Self(other)
+    }
+}
+
+impl<G: AffineCurve> From<BatchProof<G>> for Vec<Proof<G>> {
+    fn from(other: BatchProof<G>) -> Self {
+        other.0
+    }
+}
+
 /// `SuccinctCheckPolynomial` is a succinctly-representated polynomial
 /// generated from the `log_d` random oracle challenges generated in `open`.
 /// It has the special property that can be evaluated in `O(log_d)` time.

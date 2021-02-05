@@ -18,7 +18,7 @@ use r1cs_std::{
 use std::marker::PhantomData;
 
 /// the trait for Fiat-Shamir RNG Gadget
-pub trait FiatShamirRngGadget<F: PrimeField, ConstraintF: PrimeField>: Sized {
+pub trait FiatShamirRngGadget<F: PrimeField, ConstraintF: PrimeField>: Sized + Clone {
 
     /// initialize the RNG
     fn new<CS: ConstraintSystem<ConstraintF>>(cs: CS) -> Result<Self, SynthesisError>;

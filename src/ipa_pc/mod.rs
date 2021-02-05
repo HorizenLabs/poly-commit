@@ -12,6 +12,9 @@ use rand_core::RngCore;
 mod data_structures;
 pub use data_structures::*;
 
+#[doc(hidden)]
+pub mod constraints;
+
 use rayon::prelude::*;
 
 #[cfg(feature = "gpu")]
@@ -369,7 +372,7 @@ impl<
     type Randomness = Randomness<G>;
     type RandomOracle = FS;
     type Proof = Proof<G>;
-    type BatchProof = Vec<Self::Proof>;
+    type BatchProof = BatchProof<G>;
     type Error = Error;
 
     fn setup<R: RngCore, D: Digest>(
@@ -810,14 +813,14 @@ impl<
             labels.1.insert(label);
         }
 
-        assert_eq!(proof.len(), query_to_labels_map.len());
+        assert_eq!(proof.0.len(), query_to_labels_map.len());
 
         let mut randomizer = G::ScalarField::one();
 
         let mut combined_check_poly = Polynomial::zero();
         let mut combined_final_key = <G::Projective as ProjectiveCurve>::zero();
 
-        for ((_point_label, (point, labels)), p) in query_to_labels_map.into_iter().zip(proof) {
+        for ((_point_label, (point, labels)), p) in query_to_labels_map.into_iter().zip(proof.0.iter().cloned()) {
             let lc_time =
                 start_timer!(|| format!("Randomly combining {} commitments", labels.len()));
             let mut comms: Vec<&'_ LabeledCommitment<_>> = Vec::new();
@@ -842,7 +845,7 @@ impl<
                 comms.into_iter(),
                 *point,
                 vals.into_iter(),
-                p,
+                &p,
                 ro
             );
 
