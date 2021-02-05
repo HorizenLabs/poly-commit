@@ -57,6 +57,12 @@ where
 
 #[cfg(test)]
 mod test {
+    use algebra::{
+        biginteger::BigInteger256,
+        fields::tweedle::{
+            fq::Fq, fr::Fr,
+        }
+    };
     use algebra::UniformRand;
     use crate::fiat_shamir::test::test_absorb_squeeze_vals;
     use crate::fiat_shamir::test::test_squeeze_consistency;
@@ -64,43 +70,70 @@ mod test {
     use rand_chacha::ChaCha20Rng;
 
     #[test]
-    fn test_fs_rng_poseidon_bn_382(){
+    fn test_fs_rng_poseidon_tweedle_fr(){
 
-        use algebra::{
-            biginteger::BigInteger384,
-            fields::bn_382::{
-                fq::Fq, fr::Fr,
-            }
-        };
-        use primitives::crh::poseidon::parameters::bn382::BN382FrPoseidonSponge;
+        use primitives::crh::poseidon::parameters::tweedle::TweedleFrPoseidonSponge;
 
         let rng = &mut ChaCha20Rng::from_seed([
             1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2]);
         let non_native_inputs = vec![Fq::rand(rng); 5];
         let native_inputs = vec![Fr::rand(rng); 5];
-        let byte_inputs = "TEST_FS_RNG_WITH_BN_382".as_bytes();
-        test_absorb_squeeze_vals::<Fq, _, BN382FrPoseidonSponge>(
+        let byte_inputs = "TEST_FS_RNG_WITH_TWEEDLE_FR".as_bytes();
+        test_absorb_squeeze_vals::<Fq, _, TweedleFrPoseidonSponge>(
             non_native_inputs,
             native_inputs,
             byte_inputs,
-
             (
-                Fq::new(BigInteger384([16968539842303851061, 17801941139790967157, 11912872069032247438, 17347049997685724293, 13166518364374500900, 1501581078475130236])),
-                Fr::new(BigInteger384([11009198143356571695, 9233983554336419381, 5206816659168252705, 4904572273100637839, 294675676069883180, 1073871216927475505])),
-                Fq::new(BigInteger384([15482123150356760728, 10708171711392742622, 1687588660499287236, 16801333765857531051, 6655449532438561903, 1588057202412049339])),
+                Fq::new(BigInteger256([16516461252645333510, 10583677234309980696, 5655830494698526076, 2197463957596152184])),
+                Fr::new(BigInteger256([1610033271994723242, 1420210711007191983, 416660917984504738, 791684900968741548])),
+                Fq::new(BigInteger256([5894700794493033821, 9134426241895411758, 8257224035426028354, 3915305244924448883])),
             ),
             (
-                Fq::new(BigInteger384([252899744532148700, 5167787041418753963, 4135228996322313624, 17778754025806233207, 8342627014844318588, 1539545592305393292])),
-                Fr::new(BigInteger384([7197609493738603709, 16793498479102870848, 12116352465778914752, 7555252794275463479, 15762501231817493649, 1559517585302804411])),
-                Fq::new(BigInteger384([725413744086744838, 14140917903316955258, 8097716872723691675, 12928722430078030776, 12458917807539945424, 326619231893636028])),
+                Fq::new(BigInteger256([6456252896587977852, 12500533173042997806, 13956330679943382636, 4184773496251846477])),
+                Fr::new(BigInteger256([8855038643308334620, 4634386296115890190, 4579257527088864698, 691747633033767970])),
+                Fq::new(BigInteger256([6018885514446331441, 12572350802444592318, 468387694499328978, 3900333247289797302])),
             ),
             (
-                Fq::new(BigInteger384([3605268303452637718, 17865450864202203648, 16429906542836552110, 18390336681103651815, 17320053392015396414, 1475195523236156910])),
-                Fr::new(BigInteger384([17327961317228976599, 14920233244743080316, 11337553424800437501, 10467062516926635978, 8332404348717572274, 967231975056851993])),
-                Fq::new(BigInteger384([13263303052593867052, 632240603357477765, 3296826592338440535, 1361321415044672543, 15199457239458622347, 878356618377807551])),
+                Fq::new(BigInteger256([8102280768793942757, 7525476414605893128, 13706533693355979953, 1327905306094223431])),
+                Fr::new(BigInteger256([9407600689200936381, 6574634219841608579, 2996693058326046885, 3521360952488081455])),
+                Fq::new(BigInteger256([14731716235130337525, 4919963741794774586, 16578268229673767195, 3638084636820484437])),
             )
         );
 
-        test_squeeze_consistency::<Fq, _, BN382FrPoseidonSponge>();
+        test_squeeze_consistency::<Fq, _, TweedleFrPoseidonSponge>();
+    }
+
+    #[test]
+    fn test_fs_rng_poseidon_tweedle_fq(){
+
+        use primitives::crh::poseidon::parameters::tweedle::TweedleFqPoseidonSponge;
+
+        let rng = &mut ChaCha20Rng::from_seed([
+            1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2]);
+        let non_native_inputs = vec![Fr::rand(rng); 5];
+        let native_inputs = vec![Fq::rand(rng); 5];
+        let byte_inputs = "TEST_FS_RNG_WITH_TWEEDLE_FQ".as_bytes();
+        test_absorb_squeeze_vals::<Fr, _, TweedleFqPoseidonSponge>(
+            non_native_inputs,
+            native_inputs,
+            byte_inputs,
+            (
+                Fr::new(BigInteger256([10762946725029652877, 13005361501190432681, 18024519008534991755, 3248501990851186298])),
+                Fq::new(BigInteger256([8941957288665901150, 18066340813446135570, 15284631204673323353, 2402757555543135154])),
+                Fr::new(BigInteger256([6378365208770626185, 13420982113762396523, 15904242776272886228, 4262364034036701501])),
+            ),
+            (
+                Fr::new(BigInteger256([261060505832591120, 6645565064699753870, 5681232411053781566, 2415417108750069081])),
+                Fq::new(BigInteger256([15918289345942480957, 10678384469336226475, 9949997421033032654, 1781468515090487909])),
+                Fr::new(BigInteger256([5336496322269491397, 9099152767105313647, 12181864234399154007, 3639884640497234796])),
+            ),
+            (
+                Fr::new(BigInteger256([1616875255399882483, 18446592942995947804, 887637818947102451, 3885902919121541649])),
+                Fq::new(BigInteger256([14893396250722415518, 14008025679778793897, 8676609536434381080, 731394336888061081])),
+                Fr::new(BigInteger256([9205189026741700221, 12198393360744278704, 3357649801577616719, 4133680788571664179])),
+            ),
+        );
+
+        test_squeeze_consistency::<Fr, _, TweedleFqPoseidonSponge>();
     }
 }

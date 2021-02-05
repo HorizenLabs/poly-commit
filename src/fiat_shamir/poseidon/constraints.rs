@@ -104,7 +104,9 @@ for PoseidonSpongeGadget<ConstraintF, P, SB, SBG>
 
 #[cfg(test)]
 mod test {
-
+    use algebra::fields::tweedle::{
+        fq::Fq, fr::Fr
+    };
     use algebra::UniformRand;
     use crate::fiat_shamir::constraints::test::test_native_result;
     use crate::fiat_shamir::constraints::test::test_gadget_squeeze_consistency;
@@ -112,13 +114,10 @@ mod test {
     use rand_core::RngCore;
 
     #[test]
-    fn test_native_poseidon_fs_gadget_bn_382() {
+    fn test_native_poseidon_fs_gadget_tweedle_fr() {
 
-        use algebra::fields::bn_382::{
-            fq::Fq, fr::Fr
-        };
-        use primitives::crh::poseidon::parameters::bn382::BN382FrPoseidonSponge;
-        use r1cs_crypto::crh::poseidon::bn382::BN382FrPoseidonSpongeGadget;
+        use primitives::crh::poseidon::parameters::tweedle::TweedleFrPoseidonSponge;
+        use r1cs_crypto::crh::poseidon::tweedle::TweedleFrPoseidonSpongeGadget;
 
         let rng = &mut thread_rng();
 
@@ -128,11 +127,33 @@ mod test {
             let mut byte_inputs = vec![0u8; 100];
             rng.fill_bytes(&mut byte_inputs);
 
-            test_native_result::<Fq, Fr, BN382FrPoseidonSponge, BN382FrPoseidonSpongeGadget>(
+            test_native_result::<Fq, Fr, TweedleFrPoseidonSponge, TweedleFrPoseidonSpongeGadget>(
                 non_native_inputs, native_inputs, &byte_inputs
             );
 
-            test_gadget_squeeze_consistency::<Fq, Fr, BN382FrPoseidonSpongeGadget>();
+            test_gadget_squeeze_consistency::<Fq, Fr, TweedleFrPoseidonSpongeGadget>();
+        }
+    }
+
+    #[test]
+    fn test_native_poseidon_fs_gadget_tweedle_fq() {
+
+        use primitives::crh::poseidon::parameters::tweedle::TweedleFqPoseidonSponge;
+        use r1cs_crypto::crh::poseidon::tweedle::TweedleFqPoseidonSpongeGadget;
+
+        let rng = &mut thread_rng();
+
+        for _ in 0..10 {
+            let non_native_inputs = vec![Fr::rand(rng); 5];
+            let native_inputs = vec![Fq::rand(rng); 5];
+            let mut byte_inputs = vec![0u8; 100];
+            rng.fill_bytes(&mut byte_inputs);
+
+            test_native_result::<Fr, Fq, TweedleFqPoseidonSponge, TweedleFqPoseidonSpongeGadget>(
+                non_native_inputs, native_inputs, &byte_inputs
+            );
+
+            test_gadget_squeeze_consistency::<Fr, Fq, TweedleFqPoseidonSpongeGadget>();
         }
     }
 }

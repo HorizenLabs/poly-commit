@@ -38,9 +38,9 @@ algebra-kernels = {git = "https://github.com/HorizenOfficial/ginger-algebra-ocl"
 
 [dev-dependencies]
 rand = { version = "0.7", default-features = false }
-algebra = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "nonnative", features = ["bls12_381", "jubjub", "bn_382", "bls12_377", "tweedle"] }
-primitives = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "nonnative", features = ["bn_382"]}
-r1cs-crypto = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "nonnative", features = ["bn_382"]}
+algebra = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "nonnative", features = ["tweedle"] }
+primitives = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "nonnative", features = ["tweedle"]}
+r1cs-crypto = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "nonnative", features = ["tweedle"]}
 
 blake2 = { version = "0.8", default-features = false }
 

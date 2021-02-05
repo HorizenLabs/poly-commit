@@ -1080,91 +1080,91 @@ mod tests {
     use super::InnerProductArgPC;
 
     use algebra::{
-        fields::bn_382::{
+        fields::tweedle::{
             Fq, Fr
         },
-        curves::bn_382::g::{
+        curves::tweedle::dum::{
             Affine, Projective,
         }
     };
     use blake2::Blake2s;
-    use primitives::crh::poseidon::bn382::BN382FrPoseidonSponge;
+    use primitives::crh::poseidon::tweedle::TweedleFrPoseidonSponge;
 
     type PC<F, G, FS> = InnerProductArgPC<F, G, FS>;
-    type PC_BN382 = PC<Fr, Affine, BN382FrPoseidonSponge>;
+    type PC_TWEEDLE = PC<Fr, Affine, TweedleFrPoseidonSponge>;
 
     #[test]
     fn constant_poly_test() {
         use crate::tests::*;
-        constant_poly_test::<_, PC_BN382, Blake2s>().expect("test failed for tweedle_dee-blake2s");
+        constant_poly_test::<_, PC_TWEEDLE, Blake2s>().expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn single_poly_test() {
         use crate::tests::*;
-        single_poly_test::<_, PC_BN382, Blake2s>().expect("test failed for tweedle_dee-blake2s");
+        single_poly_test::<_, PC_TWEEDLE, Blake2s>().expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn quadratic_poly_degree_bound_multiple_queries_test() {
         use crate::tests::*;
-        quadratic_poly_degree_bound_multiple_queries_test::<_, PC_BN382, Blake2s>()
+        quadratic_poly_degree_bound_multiple_queries_test::<_, PC_TWEEDLE, Blake2s>()
             .expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn linear_poly_degree_bound_test() {
         use crate::tests::*;
-        linear_poly_degree_bound_test::<_, PC_BN382, Blake2s>()
+        linear_poly_degree_bound_test::<_, PC_TWEEDLE, Blake2s>()
             .expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn single_poly_degree_bound_test() {
         use crate::tests::*;
-        single_poly_degree_bound_test::<_, PC_BN382, Blake2s>()
+        single_poly_degree_bound_test::<_, PC_TWEEDLE, Blake2s>()
             .expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn single_poly_degree_bound_multiple_queries_test() {
         use crate::tests::*;
-        single_poly_degree_bound_multiple_queries_test::<_, PC_BN382, Blake2s>()
+        single_poly_degree_bound_multiple_queries_test::<_, PC_TWEEDLE, Blake2s>()
             .expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn two_polys_degree_bound_single_query_test() {
         use crate::tests::*;
-        two_polys_degree_bound_single_query_test::<_, PC_BN382, Blake2s>()
+        two_polys_degree_bound_single_query_test::<_, PC_TWEEDLE, Blake2s>()
             .expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn full_end_to_end_test() {
         use crate::tests::*;
-        full_end_to_end_test::<_, PC_BN382, Blake2s>().expect("test failed for tweedle_dee-blake2s");
+        full_end_to_end_test::<_, PC_TWEEDLE, Blake2s>().expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
 
     #[test]
     fn single_equation_test() {
         use crate::tests::*;
-        single_equation_test::<_, PC_BN382, Blake2s>().expect("test failed for tweedle_dee-blake2s");
+        single_equation_test::<_, PC_TWEEDLE, Blake2s>().expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
 
     #[test]
     fn two_equation_test() {
         use crate::tests::*;
-        two_equation_test::<_, PC_BN382, Blake2s>().expect("test failed for tweedle_dee-blake2s");
+        two_equation_test::<_, PC_TWEEDLE, Blake2s>().expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
 
     #[test]
     fn two_equation_degree_bound_test() {
         use crate::tests::*;
-        two_equation_degree_bound_test::<_, PC_BN382, Blake2s>()
+        two_equation_degree_bound_test::<_, PC_TWEEDLE, Blake2s>()
             .expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
@@ -1172,7 +1172,7 @@ mod tests {
     #[test]
     fn full_end_to_end_equation_test() {
         use crate::tests::*;
-        full_end_to_end_equation_test::<_, PC_BN382, Blake2s>()
+        full_end_to_end_equation_test::<_, PC_TWEEDLE, Blake2s>()
             .expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
@@ -1181,7 +1181,7 @@ mod tests {
     #[should_panic]
     fn bad_degree_bound_test() {
         use crate::tests::*;
-        bad_degree_bound_test::<_, PC_BN382, Blake2s>().expect("test failed for tweedle_dee-blake2s");
+        bad_degree_bound_test::<_, PC_TWEEDLE, Blake2s>().expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
 
@@ -1240,7 +1240,7 @@ mod tests {
             .zip(key_r)
             .for_each(|(k_l, k_r)| *k_l += &k_r.mul(round_challenge));
 
-        PC_BN382::polycommit_round_reduce(
+        PC_TWEEDLE::polycommit_round_reduce(
             round_challenge,
             round_challenge_inv,
             &mut gpu_coeffs_l,
