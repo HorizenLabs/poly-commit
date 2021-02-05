@@ -111,12 +111,53 @@ for InnerProductArgPCGadget<F, ConstraintF, G, GG, FSG>
     }
 
     fn verify_polynomial_commitment_from_lagrange_representation<CS: ConstraintSystem<ConstraintF>>(
-        _cs:                  CS,
-        _expected_comm:       &Self::CommitmentGadget,
-        _lagrange_poly_comms: &[Commitment<G>],
-        _poly_coords:         &[NonNativeFieldGadget<F, ConstraintF>],
+        mut cs:              CS,
+        expected_comm:       &Self::CommitmentGadget,
+        lagrange_poly_comms: &[Commitment<G>],
+        poly_coords:         &[NonNativeFieldGadget<F, ConstraintF>],
     ) -> Result<(), SynthesisError>
     {
-        unimplemented!()
+        use algebra::{
+            UniformRand, ProjectiveCurve
+        };
+        use r1cs_std::ToBitsGadget;
+
+        assert_eq!(poly_coords.len(), lagrange_poly_comms.len());
+
+        // Get the bits from the non native field gadget
+        let poly_coords_bits = poly_coords.iter().enumerate().map(|(i, poly_coord)| {
+            //TODO: Is range proof really needed here ?
+            poly_coord.to_bits_strict(cs.ns(|| format!("poly coord {} to bits strict", i)))
+        }).collect::<Result<Vec<_>, SynthesisError>>()?;
+
+        // Random shift to avoid exceptional cases if add is incomplete.
+        // With overwhelming probability the circuit will be satisfiable,
+        // otherwise the prover can sample another shift by re-running
+        // the proof creation.
+        let shift = GG::alloc(cs.ns(|| "alloc random shift"), || {
+            let mut rng = rand_core::OsRng::default();
+            Ok(loop {
+                let r = G::Projective::rand(&mut rng);
+                if !r.into_affine().is_zero() { break(r) }
+            })
+        })?;
+
+        // Fixed Base MSM
+        // WARNING: If the addition for G is incomplete and one of the bit sequences is
+        // all 0s, this will result in a crash.
+        let mut result = shift.clone();
+        for (i, bits) in poly_coords_bits.into_iter().enumerate() {
+            result = GG::mul_bits_fixed_base(
+                &lagrange_poly_comms[i].comm.into_projective(),
+                cs.ns(|| format!("x_{} * COMM(L_{})", i, i)),
+                &result,
+                &bits
+            )?;
+        }
+        result.sub(cs.ns(|| format!("subtract shift")), &shift)?;
+
+        result.enforce_equal(cs.ns(|| "actual_comm == expected_comm"), &expected_comm.comm)?;
+
+        Ok(())
     }
 }
