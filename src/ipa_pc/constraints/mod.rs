@@ -156,7 +156,7 @@ for InnerProductArgPCGadget<F, ConstraintF, G, GG, FSG>
                 &bits
             )?;
         }
-        result.sub(cs.ns(|| format!("subtract shift")), &shift)?;
+        result = result.sub(cs.ns(|| format!("subtract shift")), &shift)?;
 
         result.enforce_equal(cs.ns(|| "actual_comm == expected_comm"), &expected_comm.comm)?;
 
