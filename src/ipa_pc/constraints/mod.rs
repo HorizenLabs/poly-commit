@@ -127,7 +127,9 @@ for InnerProductArgPCGadget<F, ConstraintF, G, GG, FSG>
         // Get the bits from the non native field gadget
         let poly_coords_bits = poly_coords.iter().enumerate().map(|(i, poly_coord)| {
             //TODO: Is range proof really needed here ?
-            poly_coord.to_bits_strict(cs.ns(|| format!("poly coord {} to bits strict", i)))
+            let mut bits = poly_coord.to_bits_strict(cs.ns(|| format!("poly coord {} to bits strict", i)))?;
+            bits.reverse();
+            Ok(bits)
         }).collect::<Result<Vec<_>, SynthesisError>>()?;
 
         // Random shift to avoid exceptional cases if add is incomplete.
