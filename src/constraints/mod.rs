@@ -67,7 +67,7 @@ pub trait PolynomialCommitmentGadget<
         evaluations:        &EvaluationsGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>,
         proof:              &Self::BatchProofGadget,
         fs_rng:             &mut Self::RandomOracleGadget,
-    ) -> Result<Boolean, SynthesisError>;
+    ) -> Result<(), SynthesisError>;
 
     /// Add to `CS` new constraints that conditionally check that `proof` is a valid evaluation
     /// proof at the points in `query_set` for the combinations `linear_combinations`.
@@ -80,7 +80,7 @@ pub trait PolynomialCommitmentGadget<
         evaluations:                &EvaluationsGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>,
         proof:                      &BatchLCProofGadget<G, PC, Self>,
         fs_rng:                     &mut Self::RandomOracleGadget,
-    ) -> Result<Boolean, SynthesisError>;
+    ) -> Result<(), SynthesisError>;
 
     /// Create the labeled commitment gadget from the commitment gadget
     fn create_labeled_commitment(
