@@ -199,6 +199,8 @@ pub fn get_booleans_from_sponge<
     num_bits: usize,
 ) -> Result<Vec<Boolean>, SynthesisError> {
     let bits_per_element = ConstraintF::size_in_bits() - 1;
+
+    // This is a way to compute ceil(num_bits/bits_per_element)
     let num_elements = (num_bits + bits_per_element - 1) / bits_per_element;
 
     let src_elements = sponge.enforce_squeeze(
@@ -208,8 +210,9 @@ pub fn get_booleans_from_sponge<
     let mut dest_bits = Vec::<Boolean>::new();
 
     for (i, elem) in src_elements.iter().enumerate() {
-        // TODO: Note that they do a to_bits_strict here. Is it necessary ?
-        //       Also considering that next line they discard the highest bit.
+        // If only few elements are squeezed, one can omit the range proof
+        // if needed, as the security loss is just as many bits as elements
+        // squeezed.
         let elem_bits = elem.to_bits_strict(
             cs.ns(|| format!("elem {} to bits", i))
         )?;

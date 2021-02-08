@@ -1,6 +1,6 @@
 mod data_structures;
 pub use self::data_structures::*;
-use algebra::{PrimeField, AffineCurve, ProjectiveCurve, UniformRand};
+use algebra::{PrimeField, AffineCurve, ProjectiveCurve, UniformRand, Group};
 use r1cs_std::groups::GroupGadget;
 use crate::fiat_shamir::constraints::FiatShamirRngGadget;
 use r1cs_core::{ToConstraintField, ConstraintSystem, SynthesisError};
@@ -17,6 +17,8 @@ use std::collections::{
     BTreeMap, BTreeSet
 };
 use r1cs_std::alloc::ConstantGadget;
+use r1cs_std::bits::uint8::UInt8;
+use r1cs_std::Assignment;
 
 #[derive(Derivative)]
 #[derivative(
@@ -47,7 +49,7 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
         F: PrimeField,
         ConstraintF: PrimeField,
         G: AffineCurve<BaseField = ConstraintF, ScalarField = F> + ToConstraintField<ConstraintF>,
-        GG: GroupGadget<G::Projective, ConstraintF> + ToConstraintFieldGadget<ConstraintF, FieldGadget = FpGadget<ConstraintF>>,
+        GG: GroupGadget<G::Projective, ConstraintF, Value = G::Projective> + ToConstraintFieldGadget<ConstraintF, FieldGadget = FpGadget<ConstraintF>>,
         FSG: FiatShamirRngGadget<F, ConstraintF>
 {
     /// Evaluate the succinct_check_polynomial at a point, starting from the challenges
@@ -65,13 +67,10 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
 
         for (i, challenge) in challenges.iter().enumerate() {
             let i = i + 1;
-            //TODO: Can we hardcode this ?
-            let elem_degree = FpGadget::<ConstraintF>::from_value(
-                cs.ns(|| format!("hardcode elem_degree_{}", i)),
-                &G::BaseField::from((1 << (log_d - i)) as u128)
-            );
-            //TODO: Range proof needed here ?
-            let elem_degree_bits = elem_degree.to_bits_strict(cs.ns(|| format!("elem_degree to bits {}", i)))?;
+
+            let mut elem_degree_bits = UInt8::constant((1 << (log_d - i)) as u8).into_bits_le();
+            elem_degree_bits.reverse();
+
             let elem = point.pow(
                 cs.ns(|| format!("point^elem_{}", i)),
                 elem_degree_bits.as_slice()
@@ -85,34 +84,7 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
         Ok(product)
     }
 
-    /// Compute the succinct_check_polynomial starting from the challenges
-    fn compute_succinct_check_polynomial_from_challenges<CS: ConstraintSystem<ConstraintF>>(
-        mut cs:       CS,
-        challenges:   &[NonNativeFieldGadget<F, ConstraintF>],
-    ) -> Result<Vec<NonNativeFieldGadget<F, ConstraintF>>, SynthesisError>
-    {
-        let log_d = challenges.len();
-        let one = NonNativeFieldGadget::<F, ConstraintF>::one(
-            cs.ns(|| "alloc one")
-        )?;
-        let mut coeffs = vec![one; 1 << log_d];
-
-        for (i, challenge) in challenges.iter().enumerate() {
-            let i = i + 1;
-            let elem_degree = 1 << (log_d - i) as u64;
-            for start in (elem_degree..coeffs.len()).step_by(elem_degree * 2) {
-                for offset in 0..elem_degree {
-                    coeffs[start + offset].mul_in_place(
-                        cs.ns(|| format!("(coeffs[{}{}] * challenge)_{}", start, offset, i)),
-                        &challenge
-                    )?;
-                }
-            }
-        }
-        Ok(coeffs)
-    }
-
-    /// Return and enforce the coefficients of the succinct check polynomial
+    /// Enforce succinct_verification and returns the bullet challenges
     pub(crate) fn succinct_check<CS: ConstraintSystem<ConstraintF>>(
         mut cs:           CS,
         verification_key: &PreparedVerifierKeyGadget<G, GG>,
@@ -144,6 +116,9 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
 
         let mut combined_v = NonNativeFieldGadget::zero(cs.ns(|| "alloc combined v"))?;
 
+        //  TODO: Instead of squeezing new challenge each time, we can use the same one and compute
+        //        sum_i (ci * chal^i) in an optimized way using Horner's method (avoiding to
+        //        compute the powers of lambda).
         let mut cur_challenge = ro.enforce_squeeze_128_bits_nonnative_field_elements_and_bits(
             cs.ns(|| "squeeze first batching chal"),
             1
@@ -161,25 +136,26 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
                 cur_challenge.1[0].iter(),
             )?;
 
-            // TODO: Two squeezes here, even if degree bound is None. Is it really necessary ?
-            cur_challenge = ro.enforce_squeeze_128_bits_nonnative_field_elements_and_bits(
-                cs.ns(|| format!("squeeze batching chal for degree bound {}", i)),
-                1
-            )?;
-
             let degree_bound = labeled_commitment.degree_bound.as_ref();
             assert_eq!(degree_bound.is_some(), commitment.shifted_comm.is_some());
 
             if let Some(degree_bound) = degree_bound {
+                cur_challenge = ro.enforce_squeeze_128_bits_nonnative_field_elements_and_bits(
+                    cs.ns(|| format!("squeeze batching chal for degree bound {}", i)),
+                    1
+                )?;
+
                 // Exponent = supported_degree - degree_bound
                 let exponent = FpGadget::<ConstraintF>::from_value(
                     cs.ns(|| "hardcode supported vk degree"),
-                    &ConstraintF::from((verification_key.comm_key.len() - 1) as u128)
+                    &ConstraintF::from((verification_key.comm_key.len() - 1) as u32) // Will never be bigger than 2^32
                 ).sub(cs.ns(|| "exponent = supported_degree - degree_bound"), degree_bound)?;
 
                 // exponent to bits
-                //TODO: Range proof here ?
-                let mut exponent_bits = exponent.to_bits_strict(cs.ns(|| "exponent to bits strict"))?;
+                let mut exponent_bits = exponent.to_bits_with_length_restriction(
+                    cs.ns(|| "exponent to bits strict"),
+                    ConstraintF::size_in_bits() - 32
+                )?;
                 exponent_bits.reverse();
 
                 // compute shift
@@ -212,7 +188,7 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
             let rand = proof.rand.as_ref().unwrap();
 
             //TODO: Range proof here ?
-            let rand_bits = rand.to_bits_strict(cs.ns(|| "rand to bits"))?;
+            let rand_bits = rand.to_bits_strict(cs.ns(|| "rand to bits strict"))?;
 
             let hiding_challenge = {
                 ro.enforce_absorb_nonnative_field_elements(
@@ -240,7 +216,7 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
             combined_commitment = neg_vk_s.mul_bits(
                 cs.ns(|| "combined_comm += (hiding_comm * hiding_chal - vk.s * rand)"),
                 &combined_commitment,
-                rand_bits.iter()
+                rand_bits.iter().rev()
             )?;
         }
 
@@ -298,11 +274,22 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
         let mut round_commitment = h_prime.mul_bits(
             cs.ns(|| "round_commitment = combined_commitment + h_prime * combined_v"),
             &combined_commitment,
-            combined_v_bits.iter()
+            combined_v_bits.iter().rev()
         )?;
 
         let l_iter = proof.l_vec.iter();
         let r_iter = proof.r_vec.iter();
+
+        let round_shift = GG::alloc(
+            cs.ns(|| format!("alloc random shift to enforce round constraints")),
+            || {
+                let mut rng = rand_core::OsRng::default();
+                Ok(loop {
+                    let r = G::Projective::rand(&mut rng);
+                    if !r.into_affine().is_zero() { break(r) }
+                })
+            }
+        )?;
 
         for (i, (l, r)) in l_iter.zip(r_iter).enumerate() {
             let round_challenge = {
@@ -319,15 +306,34 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
                     1
                 )
             }?;
-            let round_chal_inv = round_challenge.0[0].inverse(cs.ns(|| format!("invert round chal {}", i)))?;
-            //TODO: Range proof here ?
-            let round_chal_inv_bits = round_chal_inv.to_bits_strict(cs.ns(|| format!("round_chal_inv_{} to bits_strict", i)))?;
 
-            round_commitment = l.mul_bits(
-                cs.ns(|| format!("round_commitment += (l * 1_over_round_chal)_{}", i)),
-                &round_commitment,
-                round_chal_inv_bits.iter()
-            )?;
+            // We need to compute l ^ round_chal_inv and add it to the round_commitment.
+            // Instead of explicitly enforcing the computation of the inverse in the circuit,
+            // we let the prover choose a new point temp and we enforce that temp ^ round_chal = l.
+            // The assignment is satisfied iff temp = l^round_chal_inv.
+            {
+                let temp = GG::alloc(
+                    cs.ns(|| format!("alloc (chal_inv * l)_{}", i)),
+                    || {
+                        let l_val = l.get_value().get()?;
+                        let round_chal_inv_val = round_challenge.0[0].get_value().get()?.inverse().get()?;
+                        Ok(l_val.mul(&round_chal_inv_val))
+                    }
+                )?;
+
+                temp.mul_bits(
+                    cs.ns(|| format!("(chal * temp)_{}", i)),
+                    &round_shift,
+                    round_challenge.1[0].clone().iter()
+                )?
+                    .sub(cs.ns(|| format!("subtract_shift_{}", i)), &round_shift)?
+                    .enforce_equal(cs.ns(|| format!("(chal * temp == l)_{}", i)), &l)?;
+
+                round_commitment = round_commitment.add(
+                    cs.ns(|| format!("round_commitment += ((l* 1_over_round_chal))_{}", i)),
+                    &temp
+                )?;
+            }
 
             round_commitment = r.mul_bits(
                 cs.ns(|| format!("round_commitment += ((l* 1_over_round_chal) + (r * round_chal))_{}", i)),
@@ -355,46 +361,8 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
 
         check_commitment_elem.enforce_equal(cs.ns(|| "check final comm"), &round_commitment)?;
 
-        // Compute succinct_check_poly
-        let check_poly = Self::compute_succinct_check_polynomial_from_challenges(
-            cs.ns(|| "compute succinct check poly"),
-            xi_s.as_slice()
-        )?;
-
         end_timer!(check_time);
-        Ok(check_poly)
-    }
-
-    /// Multiply all elements of `coeffs` by `scale`
-    #[inline]
-    fn scale_poly<CS: ConstraintSystem<ConstraintF>>(
-        mut cs: CS,
-        coeffs: &mut [NonNativeFieldGadget<F, ConstraintF>],
-        scale:  &NonNativeFieldGadget<F, ConstraintF>,
-    ) -> Result<(), SynthesisError>
-    {
-        coeffs.iter_mut().enumerate().map(|(i, coeff)| {
-            coeff.mul_in_place(cs.ns(|| format!("coeff_{} * scale", i)), scale)?;
-            Ok(())
-        }).collect::<Result<(), SynthesisError>>()
-    }
-
-    /// Add, coefficient-wise, `self_poly` to `other_poly`
-    #[inline]
-    fn add_polys<CS: ConstraintSystem<ConstraintF>>(
-        mut cs:      CS,
-        self_poly:   Vec<NonNativeFieldGadget<F, ConstraintF>>,
-        other_poly:  Vec<NonNativeFieldGadget<F, ConstraintF>>,
-    ) -> Result<Vec<NonNativeFieldGadget<F, ConstraintF>>, SynthesisError>
-    {
-        let mut result = if self_poly.len() >= other_poly.len() { self_poly } else { other_poly.clone() };
-
-        result.iter_mut().zip(other_poly.iter()).enumerate().map(|(i, (self_coeff, other_coeff))| {
-            self_coeff.add_in_place(cs.ns(|| format!("self_coeff_{} + other_coeff_{}", i, i)), &other_coeff)?;
-            Ok(())
-        }).collect::<Result<(), SynthesisError>>()?;
-
-        Ok(result)
+        Ok(xi_s)
     }
 
     /// Create a Pedersen commitment to `scalars` using the commitment key `comm_key`.
@@ -432,7 +400,7 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
             comm = base.mul_bits(
                 cs.ns(|| format!("comm += (base_{} * scalar_{})", i, i)),
                 &comm,
-                scalar_bits.iter()
+                scalar_bits.iter().rev()
             )?;
         }
 
@@ -451,7 +419,7 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
             comm = hiding_generator.unwrap().mul_bits(
                 cs.ns(|| "comm += (hiding_generator * randomizer)"),
                 &comm,
-                randomizer_bits.iter()
+                randomizer_bits.iter().rev()
             )?;
         }
 
@@ -465,7 +433,7 @@ for InnerProductArgPCGadget<F, ConstraintF, G, GG, FSG>
         F: PrimeField,
         ConstraintF: PrimeField,
         G: AffineCurve<BaseField = ConstraintF, ScalarField = F> + ToConstraintField<ConstraintF>,
-        GG: GroupGadget<G::Projective, ConstraintF> + ToConstraintFieldGadget<ConstraintF, FieldGadget = FpGadget<ConstraintF>>,
+        GG: GroupGadget<G::Projective, ConstraintF, Value = G::Projective> + ToConstraintFieldGadget<ConstraintF, FieldGadget = FpGadget<ConstraintF>>,
         FS: FiatShamirRng<F, ConstraintF>,
         FSG: FiatShamirRngGadget<F, ConstraintF>
 {
@@ -504,34 +472,6 @@ for InnerProductArgPCGadget<F, ConstraintF, G, GG, FSG>
 
         assert_eq!(proof.0.len(), query_to_labels_map.len());
 
-        // For each evaluation point, perform the multi-poly single-point opening
-        // check of the polynomials queried at that point.
-        // Additionaly batch the resulting check polynomials (the xi_s) and GFinals in a single
-        // dlog hard verification.
-
-        // Batching challenge
-        let mut randomizer = fs_rng.enforce_squeeze_128_bits_nonnative_field_elements_and_bits(
-            cs.ns(|| "squeeze initial randomizer"), 1
-        )?;
-
-        // Batching bullet poly
-        let mut combined_check_poly_coeffs = Vec::new();
-
-        // Random shift to avoid exceptional cases if add is incomplete.
-        // With overwhelming probability the circuit will be satisfiable,
-        // otherwise the prover can sample another shift by re-running
-        // the proof creation.
-        let shift = GG::alloc(cs.ns(|| "alloc random shift for combined_final_key"), || {
-            let mut rng = rand_core::OsRng::default();
-            Ok(loop {
-                let r = G::Projective::rand(&mut rng);
-                if !r.into_affine().is_zero() { break(r) }
-            })
-        })?;
-
-        // Batching GFinal
-        let mut combined_final_key = shift.clone();
-
         for (i, ((_point_label, (point, labels)), p)) in query_to_labels_map.into_iter().zip(proof.0.iter()).enumerate() {
             let lc_time =
                 start_timer!(|| format!("Randomly combining {} commitments", labels.len()));
@@ -553,7 +493,7 @@ for InnerProductArgPCGadget<F, ConstraintF, G, GG, FSG>
             }
 
             // Succinct verifier, return the check_poly
-            let mut check_poly_coeffs = Self::succinct_check(
+            let _ = Self::succinct_check(
                 cs.ns(|| format!("succinct check {}", i)),
                 verification_key,
                 comms.as_slice(),
@@ -563,55 +503,8 @@ for InnerProductArgPCGadget<F, ConstraintF, G, GG, FSG>
                 fs_rng
             )?;
 
-            // check_poly batching
-            Self::scale_poly(
-                cs.ns(|| format!("scale check poly {}", i)),
-                check_poly_coeffs.as_mut_slice(),
-                &randomizer.0[0]
-            )?;
-
-            if combined_check_poly_coeffs.len() == 0 {
-                combined_check_poly_coeffs = check_poly_coeffs;
-            } else {
-                combined_check_poly_coeffs = Self::add_polys(
-                    cs.ns(|| format!("combined_check_poly_{}", i)),
-                    combined_check_poly_coeffs,
-                    check_poly_coeffs
-                )?;
-            }
-
-            // GFinal batching
-            combined_final_key = p.final_comm_key.mul_bits(
-                cs.ns(|| format!("combined_GFinal += (rand * GFinal)_{}", i)),
-                &combined_final_key,
-                randomizer.1[0].iter(),
-            )?;
-
-            // Squeeze new batching challenge
-            randomizer = fs_rng.enforce_squeeze_128_bits_nonnative_field_elements_and_bits(
-                cs.ns(|| format!("squeeze randomizer {}", i)), 1
-            )?;
-
             end_timer!(lc_time);
         }
-
-        // Subtract shift from batched GFinal
-        combined_final_key = combined_final_key.sub(cs.ns(|| "subtract shift"), &shift)?;
-
-        let proof_time = start_timer!(|| "Checking batched proof");
-
-        // Dlog hard part
-        let final_key = Self::cm_commit(
-            cs.ns(|| "compute GFinal"),
-            verification_key.comm_key.as_slice(),
-            combined_check_poly_coeffs.as_slice(),
-            None,
-            None,
-        )?;
-
-        final_key.enforce_equal(cs.ns(|| "DLOG hard part"), &combined_final_key)?;
-
-        end_timer!(proof_time);
 
         Ok(())
     }

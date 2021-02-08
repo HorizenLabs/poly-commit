@@ -452,7 +452,7 @@ impl<G, GG> AllocGadget<LabeledCommitment<Commitment<G>>, <G::BaseField as Field
             let degree_bound = if let Some(degree_bound) = degree_bound {
                 Some(FpGadget::<<G::BaseField as Field>::BasePrimeField>::alloc(
                     cs.ns(|| "alloc degree bound"),
-                    || Ok(<G::BaseField as Field>::BasePrimeField::from(degree_bound as u128))
+                    || Ok(<G::BaseField as Field>::BasePrimeField::from(degree_bound as u32)) //It will never be bigger than 2^32
                 )?)
             } else {
                 None
@@ -485,7 +485,7 @@ impl<G, GG> AllocGadget<LabeledCommitment<Commitment<G>>, <G::BaseField as Field
             let degree_bound = if let Some(degree_bound) = degree_bound {
                 Some(FpGadget::<<G::BaseField as Field>::BasePrimeField>::alloc_input(
                     cs.ns(|| "alloc input degree bound"),
-                    || Ok(<G::BaseField as Field>::BasePrimeField::from(degree_bound as u128))
+                    || Ok(<G::BaseField as Field>::BasePrimeField::from(degree_bound as u32)) //It will never be bigger than 2^32
                 )?)
             } else {
                 None

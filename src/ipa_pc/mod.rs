@@ -109,12 +109,12 @@ impl<
             let commitment = labeled_commitment.commitment();
             combined_v += &(cur_challenge * &value);
             combined_commitment_proj += &labeled_commitment.commitment().comm.mul(cur_challenge);
-            cur_challenge = ro.squeeze_128_bits_nonnative_field_elements(1)[0];
 
             let degree_bound = labeled_commitment.degree_bound();
             assert_eq!(degree_bound.is_some(), commitment.shifted_comm.is_some());
 
             if let Some(degree_bound) = degree_bound {
+                cur_challenge = ro.squeeze_128_bits_nonnative_field_elements(1)[0];
                 let shift = point.pow([(vk.supported_degree() - degree_bound) as u64]);
                 combined_v += &(cur_challenge * &value * &shift);
                 combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
