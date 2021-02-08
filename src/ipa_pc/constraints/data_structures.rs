@@ -503,6 +503,23 @@ impl<G, GG> AllocGadget<LabeledCommitment<Commitment<G>>, <G::BaseField as Field
 /// Nothing to do to prepare this labeled commitment (for now).
 pub type PreparedLabeledCommitmentGadget<G, GG> = LabeledCommitmentGadget<G, GG>;
 
+impl<
+    G: AffineCurve,
+    GG: GroupGadget<G::Projective, <G::BaseField as Field>::BasePrimeField>
+    + ToConstraintFieldGadget<<G::BaseField as Field>::BasePrimeField, FieldGadget = FpGadget<<G::BaseField as Field>::BasePrimeField>>
+>
+PrepareGadget<LabeledCommitmentGadget<G, GG>, <G::BaseField as Field>::BasePrimeField>
+for PreparedLabeledCommitmentGadget<G, GG>
+{
+    fn prepare<CS: ConstraintSystem<<G::BaseField as Field>::BasePrimeField>>(
+        _cs: CS,
+        unprepared: &LabeledCommitmentGadget<G, GG>
+    ) -> Result<Self, SynthesisError>
+    {
+        Ok(unprepared.clone())
+    }
+}
+
 /// `Proof` is an evaluation proof that is output by `InnerProductArg::open`.
 #[derive(Derivative)]
 #[derivative(

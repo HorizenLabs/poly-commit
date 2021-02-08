@@ -71,7 +71,7 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
                 &G::BaseField::from((1 << (log_d - i)) as u128)
             );
             //TODO: Range proof needed here ?
-            let elem_degree_bits = elem_degree.to_bits_strict(cs.ns(|| "elem_degree_bits"))?;
+            let elem_degree_bits = elem_degree.to_bits_strict(cs.ns(|| format!("elem_degree to bits {}", i)))?;
             let elem = point.pow(
                 cs.ns(|| format!("point^elem_{}", i)),
                 elem_degree_bits.as_slice()
@@ -189,9 +189,9 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
                 )?;
 
                 combined_v = cur_challenge.0[0]
-                    .mul(cs.ns(|| format!("(cur_challenge * value)_{}", i)), value)?
-                    .mul(cs.ns(|| format!("(cur_challenge * value * shift)_{}", i)), &shift)?
-                    .add(cs.ns(|| format!("combined_v + (cur_challenge * value * shift)_{}", i)), &combined_v)?;
+                    .mul(cs.ns(|| format!("(cur_challenge * value)_deg_bound_{}", i)), value)?
+                    .mul(cs.ns(|| format!("(cur_challenge * value * shift)_deg_bound_{}", i)), &shift)?
+                    .add(cs.ns(|| format!("combined_v + (cur_challenge * value * shift)_deg_bound_{}", i)), &combined_v)?;
 
                 combined_commitment = commitment.shifted_comm.as_ref().unwrap().mul_bits(
                     cs.ns(|| format!("combined_comm += (shifted_comm * chal)_{}", i)),
@@ -307,15 +307,15 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
         for (i, (l, r)) in l_iter.zip(r_iter).enumerate() {
             let round_challenge = {
                 ro.enforce_absorb_nonnative_field_elements(
-                    cs.ns(|| format!("absorb nonnative for round chal_{}", i)),
+                    cs.ns(|| format!("absorb nonnative for round_chal_{}", i)),
                     &[round_challenge.0[0].clone()]
                 )?;
                 ro.enforce_absorb_native_field_elements(
-                    cs.ns(|| format!("absorb nonnative for round chal_{}", i)),
+                    cs.ns(|| format!("absorb native for round_chal_{}", i)),
                     &[l.clone(), r.clone()]
                 )?;
                 ro.enforce_squeeze_128_bits_nonnative_field_elements_and_bits(
-                    cs.ns(|| "squeeze first round chal"),
+                    cs.ns(|| format!("squeeze round_chal_{}", i)),
                     1
                 )
             }?;
@@ -324,13 +324,13 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
             let round_chal_inv_bits = round_chal_inv.to_bits_strict(cs.ns(|| format!("round_chal_inv_{} to bits_strict", i)))?;
 
             round_commitment = l.mul_bits(
-                cs.ns(|| format!("round_commitment += (l * 1/round_chal)_{}", i)),
+                cs.ns(|| format!("round_commitment += (l * 1_over_round_chal)_{}", i)),
                 &round_commitment,
                 round_chal_inv_bits.iter()
             )?;
 
             round_commitment = r.mul_bits(
-                cs.ns(|| format!("round_commitment += ((l* 1/round_chal) + (r * round_chal))_{}", i)),
+                cs.ns(|| format!("round_commitment += ((l* 1_over_round_chal) + (r * round_chal))_{}", i)),
                 &round_commitment,
                 round_challenge.1[0].clone().iter()
             )?;
@@ -702,5 +702,101 @@ for InnerProductArgPCGadget<F, ConstraintF, G, GG, FSG>
         result.enforce_equal(cs.ns(|| "actual_comm == expected_comm"), &expected_comm.comm)?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(non_camel_case_types)]
+
+    use super::InnerProductArgPC;
+
+    use algebra::{
+        fields::tweedle::{
+            Fq, Fr
+        },
+        curves::tweedle::dee::{
+            Affine, TweedledeeParameters as AffineParameters
+        }
+    };
+    use blake2::Blake2s;
+    use crate::ipa_pc::constraints::InnerProductArgPCGadget;
+    use r1cs_std::fields::fp::FpGadget;
+    use primitives::TweedleFqPoseidonSponge;
+    use r1cs_crypto::TweedleFqPoseidonSpongeGadget;
+    use r1cs_std::groups::curves::short_weierstrass::short_weierstrass_jacobian::AffineGadget as GroupGadget;
+
+
+    type PC<F, G, FS> = InnerProductArgPC<F, G, FS>;
+    type PC_GADGET<F, ConstraintF, G, GG, FSG> = InnerProductArgPCGadget<F, ConstraintF, G, GG, FSG>;
+
+    type AffineGadget = GroupGadget<AffineParameters, Fq, FpGadget<Fq>>;
+    type PC_TWEEDLE = PC<Fq, Affine, TweedleFqPoseidonSponge>;
+    type PC_TWEEDLE_GADGET = PC_GADGET<Fr, Fq, Affine, AffineGadget, TweedleFqPoseidonSpongeGadget>;
+    
+    #[test]
+    fn constant_poly_test() {
+        use crate::constraints::test::*;
+        constant_poly_test::<_, PC_TWEEDLE, PC_TWEEDLE_GADGET, Blake2s>().expect("test failed for tweedle_dum-blake2s");
+    }
+
+    #[test]
+    fn single_poly_test() {
+        use crate::constraints::test::*;
+        single_poly_test::<_, PC_TWEEDLE, PC_TWEEDLE_GADGET, Blake2s>().expect("test failed for tweedle_dum-blake2s");
+    }
+
+    #[test]
+    fn quadratic_poly_degree_bound_multiple_queries_test() {
+        use crate::constraints::test::*;
+        quadratic_poly_degree_bound_multiple_queries_test::<_, PC_TWEEDLE, PC_TWEEDLE_GADGET, Blake2s>()
+            .expect("test failed for tweedle_dum-blake2s");
+    }
+
+    #[test]
+    fn linear_poly_degree_bound_test() {
+        use crate::constraints::test::*;
+        linear_poly_degree_bound_test::<_, PC_TWEEDLE, PC_TWEEDLE_GADGET, Blake2s>()
+            .expect("test failed for tweedle_dum-blake2s");
+    }
+
+    #[test]
+    fn single_poly_degree_bound_test() {
+        use crate::constraints::test::*;
+        single_poly_degree_bound_test::<_, PC_TWEEDLE, PC_TWEEDLE_GADGET, Blake2s>()
+            .expect("test failed for tweedle_dum-blake2s");
+    }
+
+    #[test]
+    fn single_poly_degree_bound_multiple_queries_test() {
+        use crate::constraints::test::*;
+
+        single_poly_degree_bound_multiple_queries_test::<_, PC_TWEEDLE, PC_TWEEDLE_GADGET, Blake2s>()
+            .expect("test failed for tweedle_dum-blake2s");
+    }
+
+    #[test]
+    fn two_polys_degree_bound_single_query_test() {
+        use crate::constraints::test::*;
+
+        two_polys_degree_bound_single_query_test::<_, PC_TWEEDLE, PC_TWEEDLE_GADGET, Blake2s>()
+            .expect("test failed for tweedle_dum-blake2s");
+    }
+
+    #[test]
+    fn full_end_to_end_test() {
+        use crate::constraints::test::*;
+
+        full_end_to_end_test::<_, PC_TWEEDLE, PC_TWEEDLE_GADGET, Blake2s>().expect("test failed for tweedle_dum-blake2s");
+        println!("Finished tweedle_dum-blake2s");
+    }
+
+    #[test]
+    #[should_panic]
+    fn bad_degree_bound_test() {
+        use crate::constraints::test::*;
+
+        bad_degree_bound_test::<_, PC_TWEEDLE, PC_TWEEDLE_GADGET, Blake2s>().expect("test failed for tweedle_dum-blake2s");
+        println!("Finished tweedle_dum-blake2s");
     }
 }

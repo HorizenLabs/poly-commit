@@ -532,7 +532,6 @@ impl<
             polys_iter.zip(comms_iter.zip(rands_iter))
         {
             let label = labeled_polynomial.label();
-            println!("{:?}", label);
             assert_eq!(labeled_polynomial.label(), labeled_commitment.label());
             Self::check_degrees_and_bounds(ck.supported_degree(), labeled_polynomial)?;
 
@@ -684,7 +683,6 @@ impl<
         let mut r_vec = Vec::with_capacity(log_d);
 
         let mut n = d + 1;
-        let mut i = 0;
         while n > 1 {
             let (coeffs_l, coeffs_r) = coeffs.split_at_mut(n / 2);
             let (z_l, z_r) = z.split_at_mut(n / 2);
@@ -696,14 +694,6 @@ impl<
 
             let r = Self::cm_commit(key_r, coeffs_l, None, None)
                 + &h_prime.mul(Self::inner_product(coeffs_l, z_r));
-
-            println!("L_{}: {:?}", i, l.into_affine());
-            println!("Coeffs R len: {}", coeffs_r.len());
-            println!("Non zero coeffs R: {}", coeffs_r.iter().filter(|coeff| !coeff.is_zero()).collect::<Vec<_>>().len());
-
-            println!("R_{}: {:?}", i, r.into_affine());
-            println!("Coeffs L len: {}", coeffs_l.len());
-            println!("Non zero coeffs L: {}", coeffs_l.iter().filter(|coeff| !coeff.is_zero()).collect::<Vec<_>>().len());
 
             let lr = G::Projective::batch_normalization_into_affine(vec![l, r]);
             l_vec.push(lr[0]);
@@ -736,7 +726,6 @@ impl<
             comm_key = &temp;
 
             n /= 2;
-            i += 1;
         }
 
         end_timer!(proof_time);

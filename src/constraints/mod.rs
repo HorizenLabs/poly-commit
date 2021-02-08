@@ -46,7 +46,8 @@ pub trait PolynomialCommitmentGadget<
     + Clone;
 
     /// A prepared, allocated version of `LabeledCommitment<PC::Commitment>`.
-    type PreparedLabeledCommitmentGadget: Clone;
+    type PreparedLabeledCommitmentGadget: PrepareGadget<Self::LabeledCommitmentGadget, <G::BaseField as Field>::BasePrimeField>
+                                          + Clone;
 
     /// A FiatShamirRngGadget, providing a source of random data used in the polynomial commitment checking.
     type RandomOracleGadget: FiatShamirRngGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>;
@@ -109,28 +110,43 @@ pub trait PolynomialCommitmentGadget<
         poly_coords:         &[NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>],
     ) -> Result<(), SynthesisError>;
 }
-/*
+
+
 #[cfg(test)]
-mod test {
+pub mod test {
     use crate::*;
     use algebra::{Field, UniformRand};
-    use rand::{distributions::Distribution, Rng, thread_rng};
+    use rand::{distributions::Distribution, thread_rng};
+    use crate::{
+        fiat_shamir::constraints::FiatShamirRngGadget,
+        constraints::{
+            PrepareGadget, PolynomialCommitmentGadget, QuerySetGadget,
+            EvaluationsGadget, LabeledPointGadget
+        }
+    };
+    use r1cs_std::{
+        alloc::AllocGadget,
+        fields::nonnative::nonnative_field_gadget::NonNativeFieldGadget,
+        test_constraint_system::TestConstraintSystem
+    };
+    use r1cs_core::ConstraintSystem;
+    use std::collections::{HashSet, HashMap};
 
     #[derive(Default)]
-    struct TestInfo {
+    pub struct TestInfo {
         num_iters: usize,
         max_degree: Option<usize>,
         supported_degree: Option<usize>,
         num_polynomials: usize,
         enforce_degree_bounds: bool,
         max_num_queries: usize,
-        num_equations: Option<usize>,
     }
 
-    pub fn bad_degree_bound_test<G, PC, D>() -> Result<(), PC::Error>
+    pub fn bad_degree_bound_test<G, PC, PCG, D>() -> Result<(), PC::Error>
         where
             G: AffineCurve,
             PC: PolynomialCommitment<G>,
+            PCG: PolynomialCommitmentGadget<G, PC>,
             D: Digest
     {
         let rng = &mut thread_rng();
@@ -138,6 +154,8 @@ mod test {
         let pp = PC::setup::<_, D>(max_degree, rng)?;
 
         for _ in 0..10 {
+            let mut cs = TestConstraintSystem::<<G::BaseField as Field>::BasePrimeField>::new();
+
             let supported_degree = rand::distributions::Uniform::from(1..=max_degree).sample(rng);
             assert!(
                 max_degree >= supported_degree,
@@ -180,20 +198,61 @@ mod test {
             )?;
             println!("Trimmed");
 
+            let vk_gadget = PCG::VerifierKeyGadget::alloc(
+                cs.ns(|| "alloc vk"),
+                || Ok(vk)
+            ).unwrap();
+
+            let prepared_vk_gadget = PCG::PreparedVerifierKeyGadget::prepare(
+                cs.ns(|| "prepare vk"),
+                &vk_gadget
+            ).unwrap();
+
             let (comms, rands) = PC::commit(&ck, &polynomials, Some(rng))?;
 
+            let comms_gs = comms.iter().enumerate().map(|(i, comm)| {
+                let comm = PCG::LabeledCommitmentGadget::alloc(
+                    cs.ns(|| format!("alloc comm {}", i)),
+                    || Ok(comm.clone())
+                ).unwrap();
+
+                PCG::PreparedLabeledCommitmentGadget::prepare(
+                    cs.ns(|| format!("prepare comm {}", i)),
+                    &comm
+                ).unwrap()
+            }).collect::<Vec<_>>();
+
             let mut query_set = QuerySet::new();
+            let mut query_set_gadget = QuerySetGadget::<G::ScalarField, <G::BaseField as Field>::BasePrimeField>{ 0: HashSet::new() };
+
             let mut values = Evaluations::new();
+            let mut evaluations_gadget = EvaluationsGadget::<G::ScalarField, <G::BaseField as Field>::BasePrimeField>{ 0: HashMap::new() };
+
             let point = G::ScalarField::rand(rng);
+            let point_gadget = NonNativeFieldGadget::<G::ScalarField, <G::BaseField as Field>::BasePrimeField>::alloc(
+                cs.ns(|| "alloc challenge point"),
+                || Ok(point)
+            ).unwrap();
+
             for (i, label) in labels.iter().enumerate() {
-                query_set.insert((label.clone(), (format!("{}", i), point)));
+                let point_label = format!("{}", i);
+
+                query_set.insert((label.clone(), (point_label.clone(), point)));
+                query_set_gadget.0.insert((label.clone(), LabeledPointGadget(point_label, point_gadget.clone())));
+
                 let value = polynomials[i].evaluate(point);
+                let value_gadget = NonNativeFieldGadget::<G::ScalarField, <G::BaseField as Field>::BasePrimeField>::alloc(
+                    cs.ns(|| format!("alloc eval_{}", i)),
+                    || Ok(value)
+                ).unwrap();
+
                 values.insert((label.clone(), point), value);
+                evaluations_gadget.0.insert(LabeledPointGadget(label.to_string(), point_gadget.clone()), value_gadget);
             }
             println!("Generated query set");
 
             let fs_rng = &mut PC::RandomOracle::new();
-            let proof = PC::batch_open(
+            let proof = PC::batch_open_individual_opening_challenges(
                 &ck,
                 &polynomials,
                 &comms,
@@ -202,25 +261,40 @@ mod test {
                 Some(rng),
                 fs_rng
             )?;
-            let fs_rng = &mut PC::RandomOracle::new();
-            let result = PC::batch_check(
-                &vk,
-                &comms,
-                &query_set,
-                &values,
-                &proof,
-                rng,
-                fs_rng
-            )?;
-            assert!(result, "proof was incorrect, Query set: {:#?}", query_set);
+
+            let proof_gadget = PCG::BatchProofGadget::alloc(
+                cs.ns(|| "alloc proof"),
+                || Ok(proof)
+            ).unwrap();
+
+            let fs_rng_gadget = &mut PCG::RandomOracleGadget::new(
+                cs.ns(|| "alloc fs_rng")
+            ).unwrap();
+
+            PCG::prepared_batch_check_individual_opening_challenges(
+                cs.ns(|| "batch verify"),
+                &prepared_vk_gadget,
+                comms_gs.as_slice(),
+                &query_set_gadget,
+                &evaluations_gadget,
+                &proof_gadget,
+                fs_rng_gadget,
+            ).unwrap();
+
+            if !cs.is_satisfied() {
+                println!("{:?}", cs.which_is_unsatisfied());
+            }
+
+            assert!(cs.is_satisfied(), "proof was incorrect, Query set: {:#?}", query_set);
         }
         Ok(())
     }
 
-    fn test_template<G, PC, D>(info: TestInfo) -> Result<(), PC::Error>
+    pub fn test_template<G, PC, PCG, D>(info: TestInfo) -> Result<(), PC::Error>
         where
             G: AffineCurve,
             PC: PolynomialCommitment<G>,
+            PCG: PolynomialCommitmentGadget<G, PC>,
             D: Digest,
     {
         let TestInfo {
@@ -240,6 +314,8 @@ mod test {
         let pp = PC::setup::<_, D>(max_degree, rng)?;
 
         for _ in 0..num_iters {
+            let mut cs = TestConstraintSystem::<<G::BaseField as Field>::BasePrimeField>::new();
+
             let supported_degree = match supported_degree {
                 Some(0) => 0,
                 Some(d) => d,
@@ -311,19 +387,56 @@ mod test {
             )?;
             println!("Trimmed");
 
+            let vk_gadget = PCG::VerifierKeyGadget::alloc(
+                cs.ns(|| "alloc vk"),
+                || Ok(vk)
+            ).unwrap();
+
+            let prepared_vk_gadget = PCG::PreparedVerifierKeyGadget::prepare(
+                cs.ns(|| "prepare vk"),
+                &vk_gadget
+            ).unwrap();
+
             let (comms, rands) = PC::commit(&ck, &polynomials, Some(rng))?;
 
-            // Construct query set
+            let comms_gs = comms.iter().enumerate().map(|(i, comm)| {
+                let comm = PCG::LabeledCommitmentGadget::alloc(
+                    cs.ns(|| format!("alloc comm {}", i)),
+                    || Ok(comm.clone())
+                ).unwrap();
+
+                PCG::PreparedLabeledCommitmentGadget::prepare(
+                    cs.ns(|| format!("prepare comm {}", i)),
+                    &comm
+                ).unwrap()
+            }).collect::<Vec<_>>();
+
             let mut query_set = QuerySet::new();
+            let mut query_set_gadget = QuerySetGadget::<G::ScalarField, <G::BaseField as Field>::BasePrimeField>{ 0: HashSet::new() };
+
             let mut values = Evaluations::new();
-            // let mut point = G::ScalarField::one();
-            for _ in 0..num_points_in_query_set {
-                let point = G::ScalarField::rand(rng);
-                for (i, label) in labels.iter().enumerate() {
-                    query_set.insert((label.clone(), (format!("{}", i), point)));
-                    let value = polynomials[i].evaluate(point);
-                    values.insert((label.clone(), point), value);
-                }
+            let mut evaluations_gadget = EvaluationsGadget::<G::ScalarField, <G::BaseField as Field>::BasePrimeField>{ 0: HashMap::new() };
+
+            let point = G::ScalarField::rand(rng);
+            let point_gadget = NonNativeFieldGadget::<G::ScalarField, <G::BaseField as Field>::BasePrimeField>::alloc(
+                cs.ns(|| "alloc challenge point"),
+                || Ok(point)
+            ).unwrap();
+
+            for (i, label) in labels.iter().enumerate() {
+                let point_label = format!("{}", i);
+
+                query_set.insert((label.clone(), (point_label.clone(), point)));
+                query_set_gadget.0.insert((label.clone(), LabeledPointGadget(point_label, point_gadget.clone())));
+
+                let value = polynomials[i].evaluate(point);
+                let value_gadget = NonNativeFieldGadget::<G::ScalarField, <G::BaseField as Field>::BasePrimeField>::alloc(
+                    cs.ns(|| format!("alloc eval_{}", i)),
+                    || Ok(value)
+                ).unwrap();
+
+                values.insert((label.clone(), point), value);
+                evaluations_gadget.0.insert(LabeledPointGadget(label.to_string(), point_gadget.clone()), value_gadget);
             }
             println!("Generated query set");
 
@@ -337,17 +450,28 @@ mod test {
                 Some(rng),
                 fs_rng
             )?;
-            let fs_rng = &mut PC::RandomOracle::new();
-            let result = PC::batch_check(
-                &vk,
-                &comms,
-                &query_set,
-                &values,
-                &proof,
-                rng,
-                fs_rng
-            )?;
-            if !result {
+
+            let proof_gadget = PCG::BatchProofGadget::alloc(
+                cs.ns(|| "alloc proof"),
+                || Ok(proof)
+            ).unwrap();
+
+            let fs_rng_gadget = &mut PCG::RandomOracleGadget::new(
+                cs.ns(|| "alloc fs_rng")
+            ).unwrap();
+
+            PCG::prepared_batch_check_individual_opening_challenges(
+                cs.ns(|| "batch verify"),
+                &prepared_vk_gadget,
+                comms_gs.as_slice(),
+                &query_set_gadget,
+                &evaluations_gadget,
+                &proof_gadget,
+                fs_rng_gadget,
+            ).unwrap();
+            
+            if !cs.is_satisfied() {
+                println!("{:?}", cs.which_is_unsatisfied());
                 println!(
                     "Failed with {} polynomials, num_points_in_query_set: {:?}",
                     num_polynomials, num_points_in_query_set
@@ -357,19 +481,20 @@ mod test {
                     println!("Degree: {:?}", poly.degree());
                 }
             }
-            assert!(result, "proof was incorrect, Query set: {:#?}", query_set);
+            assert!(cs.is_satisfied(), "proof was incorrect, Query set: {:#?}", query_set);
         }
         Ok(())
     }
 
-    pub fn constant_poly_test<G, PC, D>() -> Result<(), PC::Error>
+    pub fn constant_poly_test<G, PC, PCG, D>() -> Result<(), PC::Error>
         where
             G: AffineCurve,
             PC: PolynomialCommitment<G>,
+            PCG: PolynomialCommitmentGadget<G, PC>,
             D: Digest,
     {
         let info = TestInfo {
-            num_iters: 100,
+            num_iters: 1,
             max_degree: None,
             supported_degree: Some(0),
             num_polynomials: 1,
@@ -377,17 +502,18 @@ mod test {
             max_num_queries: 1,
             ..Default::default()
         };
-        test_template::<G, PC, D>(info)
+        test_template::<G, PC, PCG, D>(info)
     }
 
-    pub fn single_poly_test<G, PC, D>() -> Result<(), PC::Error>
+    pub fn single_poly_test<G, PC, PCG, D>() -> Result<(), PC::Error>
         where
             G: AffineCurve,
             PC: PolynomialCommitment<G>,
+            PCG: PolynomialCommitmentGadget<G, PC>,
             D: Digest,
     {
         let info = TestInfo {
-            num_iters: 100,
+            num_iters: 1,
             max_degree: None,
             supported_degree: None,
             num_polynomials: 1,
@@ -395,17 +521,18 @@ mod test {
             max_num_queries: 1,
             ..Default::default()
         };
-        test_template::<G, PC, D>(info)
+        test_template::<G, PC, PCG, D>(info)
     }
 
-    pub fn linear_poly_degree_bound_test<G, PC, D>() -> Result<(), PC::Error>
+    pub fn linear_poly_degree_bound_test<G, PC, PCG, D>() -> Result<(), PC::Error>
         where
             G: AffineCurve,
             PC: PolynomialCommitment<G>,
+            PCG: PolynomialCommitmentGadget<G, PC>,
             D: Digest,
     {
         let info = TestInfo {
-            num_iters: 100,
+            num_iters: 1,
             max_degree: Some(2),
             supported_degree: Some(1),
             num_polynomials: 1,
@@ -413,17 +540,18 @@ mod test {
             max_num_queries: 1,
             ..Default::default()
         };
-        test_template::<G, PC, D>(info)
+        test_template::<G, PC, PCG, D>(info)
     }
 
-    pub fn single_poly_degree_bound_test<G, PC, D>() -> Result<(), PC::Error>
+    pub fn single_poly_degree_bound_test<G, PC, PCG, D>() -> Result<(), PC::Error>
         where
             G: AffineCurve,
             PC: PolynomialCommitment<G>,
+            PCG: PolynomialCommitmentGadget<G, PC>,
             D: Digest,
     {
         let info = TestInfo {
-            num_iters: 100,
+            num_iters: 1,
             max_degree: None,
             supported_degree: None,
             num_polynomials: 1,
@@ -431,17 +559,18 @@ mod test {
             max_num_queries: 1,
             ..Default::default()
         };
-        test_template::<G, PC, D>(info)
+        test_template::<G, PC, PCG, D>(info)
     }
 
-    pub fn quadratic_poly_degree_bound_multiple_queries_test<G, PC, D>() -> Result<(), PC::Error>
+    pub fn quadratic_poly_degree_bound_multiple_queries_test<G, PC, PCG, D>() -> Result<(), PC::Error>
         where
             G: AffineCurve,
             PC: PolynomialCommitment<G>,
+            PCG: PolynomialCommitmentGadget<G, PC>,
             D: Digest,
     {
         let info = TestInfo {
-            num_iters: 100,
+            num_iters: 1,
             max_degree: Some(3),
             supported_degree: Some(2),
             num_polynomials: 1,
@@ -449,17 +578,18 @@ mod test {
             max_num_queries: 2,
             ..Default::default()
         };
-        test_template::<G, PC, D>(info)
+        test_template::<G, PC, PCG, D>(info)
     }
 
-    pub fn single_poly_degree_bound_multiple_queries_test<G, PC, D>() -> Result<(), PC::Error>
+    pub fn single_poly_degree_bound_multiple_queries_test<G, PC, PCG, D>() -> Result<(), PC::Error>
         where
             G: AffineCurve,
             PC: PolynomialCommitment<G>,
+            PCG: PolynomialCommitmentGadget<G, PC>,
             D: Digest,
     {
         let info = TestInfo {
-            num_iters: 100,
+            num_iters: 1,
             max_degree: None,
             supported_degree: None,
             num_polynomials: 1,
@@ -467,17 +597,18 @@ mod test {
             max_num_queries: 2,
             ..Default::default()
         };
-        test_template::<G, PC, D>(info)
+        test_template::<G, PC, PCG, D>(info)
     }
 
-    pub fn two_polys_degree_bound_single_query_test<G, PC, D>() -> Result<(), PC::Error>
+    pub fn two_polys_degree_bound_single_query_test<G, PC, PCG, D>() -> Result<(), PC::Error>
         where
             G: AffineCurve,
             PC: PolynomialCommitment<G>,
+            PCG: PolynomialCommitmentGadget<G, PC>,
             D: Digest,
     {
         let info = TestInfo {
-            num_iters: 100,
+            num_iters: 1,
             max_degree: None,
             supported_degree: None,
             num_polynomials: 2,
@@ -485,17 +616,18 @@ mod test {
             max_num_queries: 1,
             ..Default::default()
         };
-        test_template::<G, PC, D>(info)
+        test_template::<G, PC, PCG, D>(info)
     }
 
-    pub fn full_end_to_end_test<G, PC, D>() -> Result<(), PC::Error>
+    pub fn full_end_to_end_test<G, PC, PCG, D>() -> Result<(), PC::Error>
         where
             G: AffineCurve,
             PC: PolynomialCommitment<G>,
+            PCG: PolynomialCommitmentGadget<G, PC>,
             D: Digest,
     {
         let info = TestInfo {
-            num_iters: 100,
+            num_iters: 1,
             max_degree: None,
             supported_degree: None,
             num_polynomials: 10,
@@ -503,6 +635,6 @@ mod test {
             max_num_queries: 5,
             ..Default::default()
         };
-        test_template::<G, PC, D>(info)
+        test_template::<G, PC, PCG, D>(info)
     }
-}*/
+}
