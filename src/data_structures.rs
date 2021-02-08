@@ -84,6 +84,13 @@ pub trait PCProof: Clone + algebra::ToBytes {
     fn size_in_bytes(&self) -> usize;
 }
 
+/// Defines the minimal interface of evaluation proofs for any polynomial
+/// batch commitment scheme.
+pub trait BatchPCProof: Clone + algebra::ToBytes {
+    /// Size in bytes
+    fn size_in_bytes(&self) -> usize;
+}
+
 /// A polynomial along with information about its degree bound (if any), and the
 /// maximum number of queries that will be made to it. This latter number determines
 /// the amount of protection that will be provided to a commitment for this polynomial.
