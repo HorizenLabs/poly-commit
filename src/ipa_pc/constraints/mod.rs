@@ -16,6 +16,7 @@ use std::marker::PhantomData;
 use std::collections::{
     BTreeMap, BTreeSet
 };
+use r1cs_std::alloc::ConstantGadget;
 
 #[derive(Derivative)]
 #[derivative(
@@ -49,19 +50,324 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
         GG: GroupGadget<G::Projective, ConstraintF> + ToConstraintFieldGadget<ConstraintF, FieldGadget = FpGadget<ConstraintF>>,
         FSG: FiatShamirRngGadget<F, ConstraintF>
 {
-    /// Return and enforce the coefficients of the succinct check polynomial
-    pub(crate) fn succinct_check<'a, CS: ConstraintSystem<ConstraintF>>(
-        _cs:           CS,
-        _verification_key: &PreparedVerifierKeyGadget<G, GG>,
-        _commitments:      &[LabeledCommitmentGadget<G, GG>],
-        _point:            &NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>,
-        _values:           Vec<NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>>,
-        _proof:            &ProofGadget<G, GG>,
-        _ro:               &mut FSG,
-    ) -> Result<Vec<NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>>, SynthesisError>
-
+    /// Evaluate the succinct_check_polynomial at a point, starting from the challenges
+    fn evaluate_succinct_check_polynomial_from_challenges<CS: ConstraintSystem<ConstraintF>>(
+        mut cs:       CS,
+        challenges:   &[NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>],
+        point:        &NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>,
+    ) -> Result<NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>, SynthesisError>
     {
-        unimplemented!();
+        let log_d = challenges.len();
+        let one = NonNativeFieldGadget::<G::ScalarField, <G::BaseField as Field>::BasePrimeField>::one(
+            cs.ns(|| "alloc one")
+        )?;
+        let mut product = one.clone();
+
+        for (i, challenge) in challenges.iter().enumerate() {
+            let i = i + 1;
+            //TODO: Can we hardcode this ?
+            let elem_degree = FpGadget::<<G::BaseField as Field>::BasePrimeField>::from_value(
+                cs.ns(|| format!("hardcode elem_degree_{}", i)),
+                <G::BaseField as Field>::BasePrimeField>::from(1 << (log_d - i) as u128)
+            );
+            //TODO: Range proof needed here ?
+            let elem_degree_bits = elem_degree.to_bits_strict(cs.ns(|| "elem_degree_bits"))?;
+            let elem = point.pow(
+                cs.ns(|| format!("point^elem_{}", i)),
+                elem_degree_bits.as_slice()
+            )?;
+            product = elem
+                .mul_without_reduce(cs.ns(|| format!("(elem * challenge)_{}", i)), &challenge)?
+                .add(cs.ns(|| format!("(one + elem * challenge)_{}", i)), &one)?
+                .add(cs.ns(|| format!("product *= (one + elem * challenge)_{}", i)), &product)?
+                .reduce(cs.ns(|| format!("product_reduction_{}", i)))?;
+        }
+    }
+
+    /// Compute the succinct_check_polynomial starting from the challenges
+    fn compute_succinct_check_polynomial_from_challenges<CS: ConstraintSystem<ConstraintF>>(
+        mut cs:       CS,
+        challenges:   &[NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>],
+    ) -> Result<Vec<NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>>, SynthesisError>
+    {
+        let log_d = challenges.len();
+        let one = NonNativeFieldGadget::<G::ScalarField, <G::BaseField as Field>::BasePrimeField>::one(
+            cs.ns(|| "alloc one")
+        )?;
+        let mut coeffs = vec![one; 1 << log_d];
+
+        for (i, challenge) in challenges.iter().enumerate() {
+            let i = i + 1;
+            //TODO: Can we hardcode this ?
+            let elem_degree = FpGadget::<<G::BaseField as Field>::BasePrimeField>::from_value(
+                cs.ns(|| format!("hardcode elem_degree_{}", i)),
+                <G::BaseField as Field>::BasePrimeField>::from(1 << (log_d - i) as u128)
+            );
+            for start in (elem_degree..coeffs.len()).step_by(elem_degree * 2) {
+                for offset in 0..elem_degree {
+                    coeffs[start + offset].mul_in_place(
+                        cs.ns(|| format!("(coeffs[{}{}] * challenge)_{}", i)),
+                        &challenge
+                    )?;
+                }
+            }
+        }
+        coeffs
+    }
+
+    /// Return and enforce the coefficients of the succinct check polynomial
+    pub(crate) fn succinct_check<CS: ConstraintSystem<ConstraintF>>(
+        mut cs:           CS,
+        verification_key: &PreparedVerifierKeyGadget<G, GG>,
+        commitments:      &[LabeledCommitmentGadget<G, GG>],
+        point:            &NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>,
+        values:           Vec<NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>>,
+        proof:            &ProofGadget<G, GG>,
+        ro:               &mut FSG,
+    ) -> Result<Vec<NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>>, SynthesisError>
+    {
+        let check_time = start_timer!(|| "Succinct checking");
+
+        // Random shift to avoid exceptional cases if add is incomplete.
+        // With overwhelming probability the circuit will be satisfiable,
+        // otherwise the prover can sample another shift by re-running
+        // the proof creation.
+        let shift = GG::alloc(
+            cs.ns(|| "alloc random shift for combined commitment proj"),
+            || {
+                let mut rng = rand_core::OsRng::default();
+                Ok(loop {
+                    let r = G::Projective::rand(&mut rng);
+                    if !r.into_affine().is_zero() { break(r) }
+                })
+            }
+        )?;
+
+        let mut combined_commitment = shift.clone();
+
+        let mut combined_v = NonNativeFieldGadget::zero(cs.ns(|| "alloc combined v"))?;
+
+        let mut cur_challenge = ro.enforce_squeeze_128_bits_nonnative_field_elements_and_bits(
+            cs.ns(|| "squeeze first batching chal"),
+            1
+        )?;
+
+        for (i, (labeled_commitment, value)) in labeled_commitments.iter().zip(values.iter()).enumerate() {
+            combined_v = cur_challenge.0[0]
+                .mul_without_reduce(cs.ns(|| format!("(cur_challenge * value)_{}", i), value))?
+                .add(cs.ns(|| format!("combined_v + (cur_challenge * value)_{}", i)), &combined_v)?
+                .reduce(cs.ns(|| format!("reduce_combined_v_1_{}", i)))?;
+
+            let commitment = &labeled_commitment.commitment;
+
+            combined_commitment = commitment.comm.mul_bits(
+                cs.ns(|| format!("combined_comm += (comm * chal)_{}", i)),
+                &combined_commitment,
+                cur_challenge.1[0],
+            )?;
+
+            // TODO: Two squeezes here, even if degree bound is None. Is it really necessary ?
+            cur_challenge = ro.enforce_squeeze_128_bits_nonnative_field_elements_and_bits(
+                cs.ns(|| format!("squeeze batching chal for degree bound {}", i)),
+                1
+            )?;
+
+            let degree_bound = labeled_commitment.degree_bound.as_ref();
+            assert_eq!(degree_bound.is_some(), commitment.shifted_comm.is_some());
+
+            if let Some(degree_bound) = degree_bound {
+                // Exponent = supported_degree - degree_bound
+                let exponent = FpGadget::<<G::BaseField as Field>::BasePrimeField>::from_value(
+                    cs.ns(|| "hardcode supported vk degree"),
+                    <G::BaseField as Field>::BasePrimeField::from((verification_key.comm_key.len() - 1) as u128)
+                ).sub(cs.ns(|| "exponent = supported_degree - degree_bound"), degree_bound.unwrap())?;
+
+                // exponent to bits
+                //TODO: Range proof here ?
+                let mut exponent_bits = exponent.to_bits_strict(cs.ns(|| "exponent to bits strict"))?;
+                exponent_bits.reverse();
+
+                // compute shift
+                let shift = point.pow(
+                    cs.ns(|| "point^(supported_degree - degree_bound"),
+                    exponent_bits.as_slice()
+                )?;
+
+                combined_v = cur_challenge.0[0]
+                    .mul(cs.ns(|| format!("(cur_challenge * value)_{}", i), value))?
+                    .mul_without_reduce(cs.ns(|| format!("(cur_challenge * value * shift)_{}", i), &shift))?
+                    .add(cs.ns(|| format!("combined_v + (cur_challenge * value * shift)_{}", i)), &combined_v)?
+                    .reduce(cs.ns(|| format!("reduce_combined_v_2_{}", i)))?;
+
+                combined_commitment = commitment.shifted_comm.as_ref().unwrap().mul_bits(
+                    cs.ns(|| format!("combined_comm += (shifted_comm * chal)_{}", i)),
+                    &combined_commitment,
+                    cur_challenge.1[0],
+                )?;
+            }
+
+            cur_challenge = ro.enforce_squeeze_128_bits_nonnative_field_elements_and_bits(
+                cs.ns(|| format!("squeeze batching chal {}", i)),
+                1
+            )?;
+        }
+
+        assert_eq!(proof.hiding_comm.is_some(), proof.rand.is_some());
+        if proof.hiding_comm.is_some() {
+            let hiding_comm = proof.hiding_comm.as_ref().unwrap();
+            let rand = proof.rand.as_ref().unwrap();
+
+            //TODO: Range proof here ?
+            let rand_bits = rand.to_bits_strict(cs.ns(|| "rand to bits"))?;
+
+            let hiding_challenge = {
+                ro.enforce_absorb_nonnative_field_elements(
+                    cs.ns(|| "absorb nonnative for hiding_challenge"),
+                    &[point, combined_v]
+                )?;
+                ro.enforce_absorb_native_field_elements(
+                    cs.ns(|| "absorb native for hiding_challenge"),
+                    &[combined_commitment, hiding_comm]
+                )?;
+                ro.enforce_squeeze_128_bits_nonnative_field_elements_and_bits(
+                    cs.ns(|| "squeeze hiding_challenge"),
+                    1
+                )
+            }?;
+            
+            combined_commitment = hiding_comm.mul_bits(
+                cs.ns(|| "combined_comm += hiding_comm * hiding_chal"),
+                &combined_commitment,
+                hiding_challenge.1[0].as_slice()
+            )?;
+            
+            let neg_vk_s = verification_key.s.negate(cs.ns(|| "-vk.s"))?;
+
+            combined_commitment = neg_vk_s.mul_bits(
+                cs.ns(|| "combined_comm += (hiding_comm * hiding_chal - vk.s * rand)"),
+                &combined_commitment,
+                rand_bits.as_slice()
+            )?;
+        }
+
+        // Challenge for each round
+        let mut round_challenges = Vec::new();
+        let mut round_challenge = {
+            ro.enforce_absorb_native_field_elements(
+                cs.ns(|| "absorb native for first round chal"),
+                &[combined_commitment]
+            )?;
+            ro.enforce_absorb_nonnative_field_elements(
+                cs.ns(|| "absorb nonnative for first round chal"),
+                &[point, combined_v]
+            )?;
+            ro.enforce_squeeze_128_bits_nonnative_field_elements_and_bits(
+                cs.ns(|| "squeeze first round chal"),
+                1
+            )
+        }?;
+        
+        let h_prime = {
+            // Random shift to avoid exceptional cases if add is incomplete.
+            // With overwhelming probability the circuit will be satisfiable,
+            // otherwise the prover can sample another shift by re-running
+            // the proof creation.
+            let shift = GG::alloc(
+                cs.ns(|| "alloc random shift for h_prime"),
+                || {
+                    let mut rng = rand_core::OsRng::default();
+                    Ok(loop {
+                        let r = G::Projective::rand(&mut rng);
+                        if !r.into_affine().is_zero() { break(r) }
+                    })
+                }
+            )?;
+            
+            let result = shift.clone();
+            
+            let shifted_h_prime = verification_key.h.mul_bits(
+                cs.ns(|| "shifted_h_prime"),
+                &result,
+                round_challenge.1[0].as_slice()
+            )?;
+            
+            shifted_h_prime.sub(cs.ns(|| "h_prime"), &shift)
+        }?;
+
+        // Compute combined_commitment by subtracting shift
+        combined_commitment = combined_commitment.sub(cs.ns(|| "combined_commitment"), &shift)?;
+
+        // Compute combined_v bits
+        //TODO: Range proof here ?
+        let combined_v_bits = combined_v.to_bits_strict(cs.ns(|| "combined_v to bits strict"))?;
+
+        let mut round_commitment = h_prime.mul_bits(
+            cs.ns(|| "round_commitment = combined_commitment + h_prime * combined_v"),
+            &combined_commitment,
+            combined_v_bits.as_slice()
+        )?;
+
+        let l_iter = proof.l_vec.iter();
+        let r_iter = proof.r_vec.iter();
+
+        for (i, (l, r)) in l_iter.zip(r_iter).enumerate() {
+            let mut round_challenge = {
+                ro.enforce_absorb_nonnative_field_elements(
+                    cs.ns(|| format!("absorb nonnative for round chal_{}", i)),
+                    &[round_challenge]
+                )?;
+                ro.enforce_absorb_native_field_elements(
+                    cs.ns(|| format!("absorb nonnative for round chal_{}", i)),
+                    &[l.clone(), r.clone()]
+                )?;
+                ro.enforce_squeeze_128_bits_nonnative_field_elements_and_bits(
+                    cs.ns(|| "squeeze first round chal"),
+                    1
+                )
+            }?;
+            round_challenges.push(round_challenge);
+            let round_chal_inv = round_challenge.0[0].inverse(cs.ns(|| format!("invert round chal {}", i)))?;
+            //TODO: Range proof here ?
+            let round_chal_inv_bits = round_chal_inv.to_bits_strict(cs.ns(|| format!("round_chal_inv_{} to bits_strict", i)))?;
+
+            round_commitment = l.mul_bits(
+                cs.ns(|| format!("round_commitment += (l * 1/round_chal)_{}", i)),
+                &round_commitment,
+                round_chal_inv_bits.as_slice()
+            )?;
+
+            round_commitment = r.mul_bits(
+                cs.ns(|| format!("round_commitment += ((l* 1/round_chal) + (r * round_chal))_{}", i)),
+                &round_commitment,
+                round_challenge.1[0].as_slice()
+            )?;
+        }
+
+        let xi_s = round_challenges.into_iter().map(|chal| chal.0[0]).collect::<Vec<_>>();
+        let v_prime = Self::evaluate_succinct_check_polynomial_from_challenges(
+            cs.ns(|| "eval succinct check poly at point"),
+            xi_s.as_slice(),
+            &point
+        )?.mul(cs.ns(|| "succinct_poly(point) * proof.c"), &proof.c)?;
+
+        let check_commitment_elem: G::Projective = Self::cm_commit(
+            cs.ns(|| "compute final comm"),
+            &[proof.final_comm_key.clone(), h_prime],
+            &[proof.c.clone(), v_prime],
+            None,
+            None,
+        );
+
+        check_commitment_elem.enforce_equal(cs.ns(|| "check final comm"), &round_commitment)?;
+
+        // Compute succinct_check_poly
+        let check_poly = Self::compute_succinct_check_polynomial_from_challenges(
+            cs.ns(|| "compute succinct check poly"),
+            xi_s.as_slice()
+        )?;
+
+        end_timer!(check_time);
+        Some(check_poly)
     }
 
     /// Multiply all elements of `coeffs` by `scale`
@@ -129,7 +435,7 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
             )?;
 
             comm = base.mul_bits(
-                cs.ns(|| format!("base_{} * scalar_{}", i, i)),
+                cs.ns(|| format!("comm += (base_{} * scalar_{})", i, i)),
                 &comm,
                 scalar_bits.iter()
             )?;
@@ -148,7 +454,7 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
             )?;
 
             comm = hiding_generator.unwrap().mul_bits(
-                cs.ns(|| "hiding_generator * randomizer"),
+                cs.ns(|| "comm += (hiding_generator * randomizer)"),
                 &comm,
                 randomizer_bits.iter()
             )?;
@@ -281,7 +587,7 @@ for InnerProductArgPCGadget<F, ConstraintF, G, GG, FSG>
 
             // GFinal batching
             combined_final_key = p.final_comm_key.mul_bits(
-                cs.ns(|| format!("combine G final from proof_{}", i)),
+                cs.ns(|| format!("combined_GFinal += (rand * GFinal)_{}", i)),
                 &combined_final_key,
                 randomizer.1[0].iter(),
             )?;
