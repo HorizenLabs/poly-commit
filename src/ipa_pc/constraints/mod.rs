@@ -1,6 +1,6 @@
 mod data_structures;
 pub use self::data_structures::*;
-use algebra::{PrimeField, AffineCurve, Field, ProjectiveCurve, UniformRand};
+use algebra::{PrimeField, AffineCurve, ProjectiveCurve, UniformRand};
 use r1cs_std::groups::GroupGadget;
 use crate::fiat_shamir::constraints::FiatShamirRngGadget;
 use r1cs_core::{ToConstraintField, ConstraintSystem, SynthesisError};
@@ -53,12 +53,12 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
     /// Evaluate the succinct_check_polynomial at a point, starting from the challenges
     fn evaluate_succinct_check_polynomial_from_challenges<CS: ConstraintSystem<ConstraintF>>(
         mut cs:       CS,
-        challenges:   &[NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>],
-        point:        &NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>,
-    ) -> Result<NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>, SynthesisError>
+        challenges:   &[NonNativeFieldGadget<F, ConstraintF>],
+        point:        &NonNativeFieldGadget<F, ConstraintF>,
+    ) -> Result<NonNativeFieldGadget<F, ConstraintF>, SynthesisError>
     {
         let log_d = challenges.len();
-        let one = NonNativeFieldGadget::<G::ScalarField, <G::BaseField as Field>::BasePrimeField>::one(
+        let one = NonNativeFieldGadget::<F, ConstraintF>::one(
             cs.ns(|| "alloc one")
         )?;
         let mut product = one.clone();
@@ -66,9 +66,9 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
         for (i, challenge) in challenges.iter().enumerate() {
             let i = i + 1;
             //TODO: Can we hardcode this ?
-            let elem_degree = FpGadget::<<G::BaseField as Field>::BasePrimeField>::from_value(
+            let elem_degree = FpGadget::<ConstraintF>::from_value(
                 cs.ns(|| format!("hardcode elem_degree_{}", i)),
-                <G::BaseField as Field>::BasePrimeField>::from(1 << (log_d - i) as u128)
+                &G::BaseField::from((1 << (log_d - i)) as u128)
             );
             //TODO: Range proof needed here ?
             let elem_degree_bits = elem_degree.to_bits_strict(cs.ns(|| "elem_degree_bits"))?;
@@ -77,42 +77,39 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
                 elem_degree_bits.as_slice()
             )?;
             product = elem
-                .mul_without_reduce(cs.ns(|| format!("(elem * challenge)_{}", i)), &challenge)?
+                .mul(cs.ns(|| format!("(elem * challenge)_{}", i)), &challenge)?
                 .add(cs.ns(|| format!("(one + elem * challenge)_{}", i)), &one)?
-                .add(cs.ns(|| format!("product *= (one + elem * challenge)_{}", i)), &product)?
-                .reduce(cs.ns(|| format!("product_reduction_{}", i)))?;
+                .add(cs.ns(|| format!("product *= (one + elem * challenge)_{}", i)), &product)?;
         }
+
+        Ok(product)
     }
 
     /// Compute the succinct_check_polynomial starting from the challenges
     fn compute_succinct_check_polynomial_from_challenges<CS: ConstraintSystem<ConstraintF>>(
         mut cs:       CS,
-        challenges:   &[NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>],
-    ) -> Result<Vec<NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>>, SynthesisError>
+        challenges:   &[NonNativeFieldGadget<F, ConstraintF>],
+    ) -> Result<Vec<NonNativeFieldGadget<F, ConstraintF>>, SynthesisError>
     {
         let log_d = challenges.len();
-        let one = NonNativeFieldGadget::<G::ScalarField, <G::BaseField as Field>::BasePrimeField>::one(
+        let one = NonNativeFieldGadget::<F, ConstraintF>::one(
             cs.ns(|| "alloc one")
         )?;
         let mut coeffs = vec![one; 1 << log_d];
 
         for (i, challenge) in challenges.iter().enumerate() {
             let i = i + 1;
-            //TODO: Can we hardcode this ?
-            let elem_degree = FpGadget::<<G::BaseField as Field>::BasePrimeField>::from_value(
-                cs.ns(|| format!("hardcode elem_degree_{}", i)),
-                <G::BaseField as Field>::BasePrimeField>::from(1 << (log_d - i) as u128)
-            );
+            let elem_degree = 1 << (log_d - i) as u64;
             for start in (elem_degree..coeffs.len()).step_by(elem_degree * 2) {
                 for offset in 0..elem_degree {
                     coeffs[start + offset].mul_in_place(
-                        cs.ns(|| format!("(coeffs[{}{}] * challenge)_{}", i)),
+                        cs.ns(|| format!("(coeffs[{}{}] * challenge)_{}", start, offset, i)),
                         &challenge
                     )?;
                 }
             }
         }
-        coeffs
+        Ok(coeffs)
     }
 
     /// Return and enforce the coefficients of the succinct check polynomial
@@ -120,11 +117,11 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
         mut cs:           CS,
         verification_key: &PreparedVerifierKeyGadget<G, GG>,
         commitments:      &[LabeledCommitmentGadget<G, GG>],
-        point:            &NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>,
-        values:           Vec<NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>>,
+        point:            &NonNativeFieldGadget<F, ConstraintF>,
+        values:           Vec<NonNativeFieldGadget<F, ConstraintF>>,
         proof:            &ProofGadget<G, GG>,
         ro:               &mut FSG,
-    ) -> Result<Vec<NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>>, SynthesisError>
+    ) -> Result<Vec<NonNativeFieldGadget<F, ConstraintF>>, SynthesisError>
     {
         let check_time = start_timer!(|| "Succinct checking");
 
@@ -152,18 +149,16 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
             1
         )?;
 
-        for (i, (labeled_commitment, value)) in labeled_commitments.iter().zip(values.iter()).enumerate() {
+        for (i, (labeled_commitment, value)) in commitments.iter().zip(values.iter()).enumerate() {
             combined_v = cur_challenge.0[0]
-                .mul_without_reduce(cs.ns(|| format!("(cur_challenge * value)_{}", i), value))?
-                .add(cs.ns(|| format!("combined_v + (cur_challenge * value)_{}", i)), &combined_v)?
-                .reduce(cs.ns(|| format!("reduce_combined_v_1_{}", i)))?;
-
+                .mul(cs.ns(|| format!("(cur_challenge * value)_{}", i)), value)?
+                .add(cs.ns(|| format!("combined_v + (cur_challenge * value)_{}", i)), &combined_v)?;
             let commitment = &labeled_commitment.commitment;
 
             combined_commitment = commitment.comm.mul_bits(
                 cs.ns(|| format!("combined_comm += (comm * chal)_{}", i)),
                 &combined_commitment,
-                cur_challenge.1[0],
+                cur_challenge.1[0].iter(),
             )?;
 
             // TODO: Two squeezes here, even if degree bound is None. Is it really necessary ?
@@ -177,10 +172,10 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
 
             if let Some(degree_bound) = degree_bound {
                 // Exponent = supported_degree - degree_bound
-                let exponent = FpGadget::<<G::BaseField as Field>::BasePrimeField>::from_value(
+                let exponent = FpGadget::<ConstraintF>::from_value(
                     cs.ns(|| "hardcode supported vk degree"),
-                    <G::BaseField as Field>::BasePrimeField::from((verification_key.comm_key.len() - 1) as u128)
-                ).sub(cs.ns(|| "exponent = supported_degree - degree_bound"), degree_bound.unwrap())?;
+                    &ConstraintF::from((verification_key.comm_key.len() - 1) as u128)
+                ).sub(cs.ns(|| "exponent = supported_degree - degree_bound"), degree_bound)?;
 
                 // exponent to bits
                 //TODO: Range proof here ?
@@ -194,15 +189,14 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
                 )?;
 
                 combined_v = cur_challenge.0[0]
-                    .mul(cs.ns(|| format!("(cur_challenge * value)_{}", i), value))?
-                    .mul_without_reduce(cs.ns(|| format!("(cur_challenge * value * shift)_{}", i), &shift))?
-                    .add(cs.ns(|| format!("combined_v + (cur_challenge * value * shift)_{}", i)), &combined_v)?
-                    .reduce(cs.ns(|| format!("reduce_combined_v_2_{}", i)))?;
+                    .mul(cs.ns(|| format!("(cur_challenge * value)_{}", i)), value)?
+                    .mul(cs.ns(|| format!("(cur_challenge * value * shift)_{}", i)), &shift)?
+                    .add(cs.ns(|| format!("combined_v + (cur_challenge * value * shift)_{}", i)), &combined_v)?;
 
                 combined_commitment = commitment.shifted_comm.as_ref().unwrap().mul_bits(
                     cs.ns(|| format!("combined_comm += (shifted_comm * chal)_{}", i)),
                     &combined_commitment,
-                    cur_challenge.1[0],
+                    cur_challenge.1[0].iter(),
                 )?;
             }
 
@@ -223,11 +217,11 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
             let hiding_challenge = {
                 ro.enforce_absorb_nonnative_field_elements(
                     cs.ns(|| "absorb nonnative for hiding_challenge"),
-                    &[point, combined_v]
+                    &[point.clone(), combined_v.clone()]
                 )?;
                 ro.enforce_absorb_native_field_elements(
                     cs.ns(|| "absorb native for hiding_challenge"),
-                    &[combined_commitment, hiding_comm]
+                    &[combined_commitment.clone(), hiding_comm.clone()]
                 )?;
                 ro.enforce_squeeze_128_bits_nonnative_field_elements_and_bits(
                     cs.ns(|| "squeeze hiding_challenge"),
@@ -238,7 +232,7 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
             combined_commitment = hiding_comm.mul_bits(
                 cs.ns(|| "combined_comm += hiding_comm * hiding_chal"),
                 &combined_commitment,
-                hiding_challenge.1[0].as_slice()
+                hiding_challenge.1[0].iter()
             )?;
             
             let neg_vk_s = verification_key.s.negate(cs.ns(|| "-vk.s"))?;
@@ -246,20 +240,20 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
             combined_commitment = neg_vk_s.mul_bits(
                 cs.ns(|| "combined_comm += (hiding_comm * hiding_chal - vk.s * rand)"),
                 &combined_commitment,
-                rand_bits.as_slice()
+                rand_bits.iter()
             )?;
         }
 
         // Challenge for each round
         let mut round_challenges = Vec::new();
-        let mut round_challenge = {
+        let round_challenge = {
             ro.enforce_absorb_native_field_elements(
                 cs.ns(|| "absorb native for first round chal"),
-                &[combined_commitment]
+                &[combined_commitment.clone()]
             )?;
             ro.enforce_absorb_nonnative_field_elements(
                 cs.ns(|| "absorb nonnative for first round chal"),
-                &[point, combined_v]
+                &[point.clone(), combined_v.clone()]
             )?;
             ro.enforce_squeeze_128_bits_nonnative_field_elements_and_bits(
                 cs.ns(|| "squeeze first round chal"),
@@ -288,7 +282,7 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
             let shifted_h_prime = verification_key.h.mul_bits(
                 cs.ns(|| "shifted_h_prime"),
                 &result,
-                round_challenge.1[0].as_slice()
+                round_challenge.1[0].iter()
             )?;
             
             shifted_h_prime.sub(cs.ns(|| "h_prime"), &shift)
@@ -304,17 +298,17 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
         let mut round_commitment = h_prime.mul_bits(
             cs.ns(|| "round_commitment = combined_commitment + h_prime * combined_v"),
             &combined_commitment,
-            combined_v_bits.as_slice()
+            combined_v_bits.iter()
         )?;
 
         let l_iter = proof.l_vec.iter();
         let r_iter = proof.r_vec.iter();
 
         for (i, (l, r)) in l_iter.zip(r_iter).enumerate() {
-            let mut round_challenge = {
+            let round_challenge = {
                 ro.enforce_absorb_nonnative_field_elements(
                     cs.ns(|| format!("absorb nonnative for round chal_{}", i)),
-                    &[round_challenge]
+                    &[round_challenge.0[0].clone()]
                 )?;
                 ro.enforce_absorb_native_field_elements(
                     cs.ns(|| format!("absorb nonnative for round chal_{}", i)),
@@ -325,7 +319,6 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
                     1
                 )
             }?;
-            round_challenges.push(round_challenge);
             let round_chal_inv = round_challenge.0[0].inverse(cs.ns(|| format!("invert round chal {}", i)))?;
             //TODO: Range proof here ?
             let round_chal_inv_bits = round_chal_inv.to_bits_strict(cs.ns(|| format!("round_chal_inv_{} to bits_strict", i)))?;
@@ -333,30 +326,32 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
             round_commitment = l.mul_bits(
                 cs.ns(|| format!("round_commitment += (l * 1/round_chal)_{}", i)),
                 &round_commitment,
-                round_chal_inv_bits.as_slice()
+                round_chal_inv_bits.iter()
             )?;
 
             round_commitment = r.mul_bits(
                 cs.ns(|| format!("round_commitment += ((l* 1/round_chal) + (r * round_chal))_{}", i)),
                 &round_commitment,
-                round_challenge.1[0].as_slice()
+                round_challenge.1[0].clone().iter()
             )?;
+
+            round_challenges.push(round_challenge);
         }
 
-        let xi_s = round_challenges.into_iter().map(|chal| chal.0[0]).collect::<Vec<_>>();
+        let xi_s = round_challenges.into_iter().map(|chal| chal.0[0].clone()).collect::<Vec<_>>();
         let v_prime = Self::evaluate_succinct_check_polynomial_from_challenges(
             cs.ns(|| "eval succinct check poly at point"),
             xi_s.as_slice(),
             &point
         )?.mul(cs.ns(|| "succinct_poly(point) * proof.c"), &proof.c)?;
 
-        let check_commitment_elem: G::Projective = Self::cm_commit(
+        let check_commitment_elem = Self::cm_commit(
             cs.ns(|| "compute final comm"),
             &[proof.final_comm_key.clone(), h_prime],
             &[proof.c.clone(), v_prime],
             None,
             None,
-        );
+        )?;
 
         check_commitment_elem.enforce_equal(cs.ns(|| "check final comm"), &round_commitment)?;
 
@@ -367,15 +362,15 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
         )?;
 
         end_timer!(check_time);
-        Some(check_poly)
+        Ok(check_poly)
     }
 
     /// Multiply all elements of `coeffs` by `scale`
     #[inline]
     fn scale_poly<CS: ConstraintSystem<ConstraintF>>(
         mut cs: CS,
-        coeffs: &mut [NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>],
-        scale:  &NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>,
+        coeffs: &mut [NonNativeFieldGadget<F, ConstraintF>],
+        scale:  &NonNativeFieldGadget<F, ConstraintF>,
     ) -> Result<(), SynthesisError>
     {
         coeffs.iter_mut().enumerate().map(|(i, coeff)| {
@@ -388,9 +383,9 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
     #[inline]
     fn add_polys<CS: ConstraintSystem<ConstraintF>>(
         mut cs:      CS,
-        self_poly:   Vec<NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>>,
-        other_poly:  Vec<NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>>,
-    ) -> Result<Vec<NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>>, SynthesisError>
+        self_poly:   Vec<NonNativeFieldGadget<F, ConstraintF>>,
+        other_poly:  Vec<NonNativeFieldGadget<F, ConstraintF>>,
+    ) -> Result<Vec<NonNativeFieldGadget<F, ConstraintF>>, SynthesisError>
     {
         let mut result = if self_poly.len() >= other_poly.len() { self_poly } else { other_poly.clone() };
 
@@ -407,9 +402,9 @@ impl<F, ConstraintF, G, GG, FSG> InnerProductArgPCGadget<F, ConstraintF, G, GG, 
     fn cm_commit<CS: ConstraintSystem<ConstraintF>>(
         mut cs:           CS,
         comm_key:         &[GG],
-        scalars:          &[NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>],
+        scalars:          &[NonNativeFieldGadget<F, ConstraintF>],
         hiding_generator: Option<GG>,
-        randomizer:       Option<NonNativeFieldGadget<G::ScalarField, <G::BaseField as Field>::BasePrimeField>>,
+        randomizer:       Option<NonNativeFieldGadget<F, ConstraintF>>,
     ) -> Result<GG, SynthesisError>
     {
         // Random shift to avoid exceptional cases if add is incomplete.
