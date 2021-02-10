@@ -249,11 +249,8 @@ pub struct BatchProof<G: AffineCurve> {
     /// Muli-poly single-point proof
     pub proof: Proof<G>,
 
-    /// v = h(x), where x is fresh random challenge
-    pub batch_v: G::ScalarField,
-
     /// Commitment of the h(X) polynomial
-    pub batch_commitment: G,
+    pub batch_commitment: G, 
 
     /// Values: v_i = p_i(x), where x is fresh random challenge
     pub batch_values: Vec<G::ScalarField>
@@ -269,7 +266,6 @@ impl<G: AffineCurve> ToBytes for BatchProof<G> {
     #[inline]
     fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
         self.proof.write(&mut writer)?;
-        self.batch_v.write(&mut writer)?;
         self.batch_commitment.write(&mut writer)?;
         self.batch_values.write(&mut writer)
     }

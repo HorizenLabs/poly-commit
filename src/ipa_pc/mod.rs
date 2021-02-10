@@ -750,11 +750,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         Self::Randomness: 'a,
         Self::Commitment: 'a,
     {
-        let polys_iter = labeled_polynomials.clone().into_iter();
-        let rands_iter = rands.clone().into_iter();
-        let comms_iter = commitments.clone().into_iter();
-
         let batch_time = start_timer!(|| "Multi poly multi point batching.");
+
+        let polys_iter = labeled_polynomials.clone().into_iter();
 
         let mut opening_challenge_counter = 0;
         
@@ -778,8 +776,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         for (
             (_point_label, (point, _labels)), 
-            (labeled_polynomial, (_labeled_commitment, _randomness))
-        ) in query_to_labels_map.into_iter().zip(polys_iter.zip(comms_iter.zip(rands_iter))) {
+            labeled_polynomial
+        ) in query_to_labels_map.into_iter().zip(polys_iter) {
 
             points.push(point);
 
@@ -804,8 +802,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         }
 
         // Commitment of the h(X) polynomial
-        let batch_commitment = Self
-        ::cm_commit(
+        let batch_commitment = Self::cm_commit(
             ck.comm_key.as_slice(),
             batch_polynomial.coeffs.as_slice(),
             None,
@@ -820,9 +817,6 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             ]
             .unwrap(),
         );
-
-        // v = h(x), where x is fresh random challenge
-        let batch_v = batch_polynomial.evaluate(point);
 
         // Values: v_i = p_i(x), where x is fresh random challenge
         let mut batch_values = vec![];
@@ -867,7 +861,6 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         Ok(BatchProof {
             proof,
-            batch_v,
             batch_commitment,
             batch_values
         })
@@ -995,12 +988,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             opening_challenge_counter += 1;
         }
 
-        // Check assertion: v = SUM( lambda^i * (v_i - y_i) * (D_xi(X) / D(X)) )
-        if computed_batch_v != batch_proof.batch_v {
-            return Ok(false);
-        }
-
-        v_values.push(batch_proof.batch_v);
+        v_values.push(computed_batch_v);
 
         let mut commitments = commitments.clone().into_iter().collect::<Vec<&'a LabeledCommitment<Self::Commitment>>>();
         let labeled_batch_commitment = LabeledCommitment::new(
