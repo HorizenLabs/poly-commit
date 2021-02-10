@@ -736,6 +736,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         })
     }
 
+    /// Refers to the "Multi-poly multi-point assertions" section of the "Recursive SNARKs based on Marlin" document
     fn batch_open_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
         labeled_polynomials: impl Clone + IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
@@ -749,8 +750,6 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         Self::Randomness: 'a,
         Self::Commitment: 'a,
     {
-        let mut batch_polynomial = Polynomial::zero();
-
         let polys_iter = labeled_polynomials.clone().into_iter();
         let rands_iter = rands.clone().into_iter();
         let comms_iter = commitments.clone().into_iter();
@@ -758,6 +757,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let batch_time = start_timer!(|| "Multi poly multi point batching.");
 
         let mut opening_challenge_counter = 0;
+        
+        // lambda
         let mut cur_challenge = opening_challenges(opening_challenge_counter);
         opening_challenge_counter += 1;
 
@@ -771,7 +772,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         }
 
         let mut points = vec![];
-        let mut batch_values = vec![];
+
+        // h(X)
+        let mut batch_polynomial = Polynomial::zero();
 
         for (
             (_point_label, (point, _labels)), 
@@ -780,18 +783,30 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
             points.push(point);
 
+            // y_i
             let evaluated_y = labeled_polynomial.polynomial().evaluate(*point); 
 
+            // p_i(X) - y_i
             let polynomial_nom = labeled_polynomial.polynomial() - &Polynomial::from_coefficients_vec(vec![evaluated_y]);
-            let polynomial_denom = &Polynomial::from_coefficients_vec(vec![G::ScalarField::zero(), G::ScalarField::one()]) - &Polynomial::from_coefficients_vec(vec![*point]);
-            let polynomial = &polynomial_nom / &polynomial_denom;
 
+            // X - x_i
+            let polynomial_denom = &Polynomial::from_coefficients_vec(vec![
+                point.inverse().unwrap(), 
+                G::ScalarField::one()
+            ]);
+
+            // (p_i(X) - y_i) / (X - x_i)
+            let polynomial = &polynomial_nom / &polynomial_denom;
+            
+            // h(X) = SUM( lambda^i * ((p_i(X) - y_i) / (X - x_i)) )
             batch_polynomial += (cur_challenge, &polynomial);
 
+            // lambda^i
             cur_challenge = opening_challenges(opening_challenge_counter);
             opening_challenge_counter += 1;
         }
 
+        // Commitment of the h(X) polynomial
         let batch_commitment = Self::cm_commit(
             ck.comm_key.as_slice(),
             batch_polynomial.coeffs.as_slice(),
@@ -799,6 +814,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             None,
         ).into_affine();
 
+        // Fresh random challenge x
         let point= Self::compute_random_oracle_challenge(
             &to_bytes![
                 batch_commitment,
@@ -807,32 +823,37 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             .unwrap(),
         );
 
+        // v = h(x), where x is fresh random challenge
         let batch_v = batch_polynomial.evaluate(point);
 
+        // Values: v_i = p_i(x), where x is fresh random challenge
+        let mut batch_values = vec![];
         for labeled_polynomial in labeled_polynomials.clone().into_iter() {
             batch_values.push(labeled_polynomial.polynomial().evaluate(point));
         }
 
-        // let mut labeled_polynomials = labeled_polynomials.clone().into_iter().collect::<Vec<&'a LabeledPolynomial<G::ScalarField>>>();
-        // let labeled_batch_polynomial = LabeledPolynomial::new(
-        //     format!("Batch"),
-        //     batch_polynomial,
-        //     None,
-        //     None
-        // );
-        // labeled_polynomials.push(&labeled_batch_polynomial);
+        // h(X) polynomial added to the set of polynomials for multi-poly single-point batching
+        let mut labeled_polynomials = labeled_polynomials.clone().into_iter().collect::<Vec<&'a LabeledPolynomial<G::ScalarField>>>();
+        let labeled_batch_polynomial = LabeledPolynomial::new(
+            format!("Batch"),
+            batch_polynomial,
+            None,
+            None
+        );
+        labeled_polynomials.push(&labeled_batch_polynomial);
 
-        // let mut commitments = commitments.clone().into_iter().collect::<Vec<&'a LabeledCommitment<Self::Commitment>>>();
-        // let labeled_batch_commitment = LabeledCommitment::new(
-        //     format!("Batch"),
-        //     Commitment { comm: batch_commitment, shifted_comm: None },
-        //     None
-        // );
-        // commitments.push(&labeled_batch_commitment);
+        // Commitment of h(X) polynomial added to the set of polynomials for multi-poly single-point batching
+        let mut commitments = commitments.clone().into_iter().collect::<Vec<&'a LabeledCommitment<Self::Commitment>>>();
+        let labeled_batch_commitment = LabeledCommitment::new(
+            format!("Batch"),
+            Commitment { comm: batch_commitment, shifted_comm: None },
+            None
+        );
+        commitments.push(&labeled_batch_commitment);
 
-        // let mut rands = rands.clone().into_iter().collect::<Vec<&'a Self::Randomness>>();
-        // let batch_randomness = Randomness::empty();
-        // rands.push(&batch_randomness);
+        let mut rands = rands.clone().into_iter().collect::<Vec<&'a Self::Randomness>>();
+        let batch_randomness = Randomness::empty();
+        rands.push(&batch_randomness);
 
         end_timer!(batch_time);
 
@@ -920,7 +941,6 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let batch_check_time = start_timer!(|| "Multi poly multi point check batching");
 
         let mut query_to_labels_map = BTreeMap::new();
-
         for (label, (point_label, point)) in query_set.iter() {
             let labels = query_to_labels_map
                 .entry(point_label)
@@ -928,13 +948,28 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             labels.1.insert(label);
         }
 
+        let mut v_values = batch_proof.batch_values.clone();
         let mut points = vec![];
+        let mut y_values = vec![];
 
-        for (point_label, (point, _labels)) in query_to_labels_map.into_iter() {
+        let mut d_x_poly = Polynomial::from_coefficients_vec(vec![G::ScalarField::one()]); 
+
+        for (_point_label, (point, labels)) in query_to_labels_map.into_iter() {
+            for label in labels.into_iter() {
+                let y_i = evaluations
+                    .get(&(label.clone(), *point))
+                    .ok_or(Error::MissingEvaluation {
+                        label: label.to_string(),
+                    })?;
+                y_values.push(*y_i);
+            }
             points.push(point);
-        }
 
-        // values.push(batch_proof.batch_v);
+            d_x_poly = &d_x_poly * &Polynomial::from_coefficients_vec(vec![
+                point.inverse().unwrap(),
+                G::ScalarField::one()
+            ]);
+        }
 
         let batch_commitment = batch_proof.batch_commitment;
 
@@ -946,15 +981,54 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             .unwrap(),
         );
 
-        let values = batch_proof.batch_values.clone();
+        let mut d_x_poly_values = vec![];
 
-        // let mut commitments = commitments.clone().into_iter().collect::<Vec<&'a LabeledCommitment<Self::Commitment>>>();
-        // let labeled_batch_commitment = LabeledCommitment::new(
-        //     format!("Batch"),
-        //     Commitment { comm: batch_commitment, shifted_comm: None },
-        //     None
-        // );
-        // commitments.push(&labeled_batch_commitment);
+        for i in 0..points.len() {
+            let mut poly = Polynomial::from_coefficients_vec(vec![
+                point.inverse().unwrap(),
+                G::ScalarField::one()
+            ]);
+            for k in 0..points.len() {
+                if i != k {
+                    poly = &poly * &Polynomial::from_coefficients_vec(vec![
+                        points[k].inverse().unwrap(),
+                        G::ScalarField::one()
+                    ]);                            
+                }
+            }
+            d_x_poly_values.push(poly);
+        }
+
+        let mut opening_challenge_counter = 0;
+        let mut cur_challenge = opening_challenges(opening_challenge_counter);
+        let mut sum_poly = Polynomial::zero();
+        opening_challenge_counter += 1;
+
+        for ((y_i, v_i), d_xi_poly) in y_values.clone().into_iter().zip(v_values.clone()).zip(d_x_poly_values) {
+
+            let mut t = v_i - &y_i;
+            t *= &cur_challenge;
+
+            let poly = &d_xi_poly / &d_x_poly;
+            sum_poly += (t, &poly);
+
+            cur_challenge = opening_challenges(opening_challenge_counter);
+            opening_challenge_counter += 1;
+        }
+
+        if !G::ScalarField::is_zero(&(sum_poly.coeffs[0] - &batch_proof.batch_v)) {
+            return Ok(false);
+        }
+
+        v_values.push(batch_proof.batch_v);
+
+        let mut commitments = commitments.clone().into_iter().collect::<Vec<&'a LabeledCommitment<Self::Commitment>>>();
+        let labeled_batch_commitment = LabeledCommitment::new(
+            format!("Batch"),
+            Commitment { comm: batch_commitment, shifted_comm: None },
+            None
+        );
+        commitments.push(&labeled_batch_commitment);
 
         end_timer!(batch_check_time);
 
@@ -964,7 +1038,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             vk,
             commitments,
             point,
-            values,
+            v_values,
             proof,
             opening_challenges,
             Some(rng)
