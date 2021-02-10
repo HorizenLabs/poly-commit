@@ -786,17 +786,14 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             // y_i
             let evaluated_y = labeled_polynomial.polynomial().evaluate(*point); 
 
-            // p_i(X) - y_i
-            let polynomial_nom = labeled_polynomial.polynomial() - &Polynomial::from_coefficients_vec(vec![evaluated_y]);
-
-            // X - x_i
-            let polynomial_denom = &Polynomial::from_coefficients_vec(vec![
-                point.inverse().unwrap(), 
+            // (p_i(X) - y_i) / (X - x_i)
+            let polynomial = 
+            &(labeled_polynomial.polynomial() - &Polynomial::from_coefficients_vec(vec![evaluated_y])) 
+            / 
+            &Polynomial::from_coefficients_vec(vec![
+                (G::ScalarField::zero() - &point), 
                 G::ScalarField::one()
             ]);
-
-            // (p_i(X) - y_i) / (X - x_i)
-            let polynomial = &polynomial_nom / &polynomial_denom;
             
             // h(X) = SUM( lambda^i * ((p_i(X) - y_i) / (X - x_i)) )
             batch_polynomial += (cur_challenge, &polynomial);
@@ -807,7 +804,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         }
 
         // Commitment of the h(X) polynomial
-        let batch_commitment = Self::cm_commit(
+        let batch_commitment = Self
+        ::cm_commit(
             ck.comm_key.as_slice(),
             batch_polynomial.coeffs.as_slice(),
             None,
@@ -948,11 +946,14 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             labels.1.insert(label);
         }
 
+        // v_i values
         let mut v_values = batch_proof.batch_values.clone();
-        let mut points = vec![];
+
+        // y_i vallues
         let mut y_values = vec![];
 
-        let mut d_x_poly = Polynomial::from_coefficients_vec(vec![G::ScalarField::one()]); 
+        // x_i values
+        let mut points = vec![];
 
         for (_point_label, (point, labels)) in query_to_labels_map.into_iter() {
             for label in labels.into_iter() {
@@ -964,15 +965,12 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 y_values.push(*y_i);
             }
             points.push(point);
-
-            d_x_poly = &d_x_poly * &Polynomial::from_coefficients_vec(vec![
-                point.inverse().unwrap(),
-                G::ScalarField::one()
-            ]);
         }
 
+        // Commitment of the h(X) polynomial
         let batch_commitment = batch_proof.batch_commitment;
 
+        // Fresh random challenge x
         let point = Self::compute_random_oracle_challenge(
             &to_bytes![
                 batch_commitment,
@@ -981,42 +979,24 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             .unwrap(),
         );
 
-        let mut d_x_poly_values = vec![];
-
-        for i in 0..points.len() {
-            let mut poly = Polynomial::from_coefficients_vec(vec![
-                point.inverse().unwrap(),
-                G::ScalarField::one()
-            ]);
-            for k in 0..points.len() {
-                if i != k {
-                    poly = &poly * &Polynomial::from_coefficients_vec(vec![
-                        points[k].inverse().unwrap(),
-                        G::ScalarField::one()
-                    ]);                            
-                }
-            }
-            d_x_poly_values.push(poly);
-        }
-
         let mut opening_challenge_counter = 0;
+
+        // lambda
         let mut cur_challenge = opening_challenges(opening_challenge_counter);
-        let mut sum_poly = Polynomial::zero();
         opening_challenge_counter += 1;
 
-        for ((y_i, v_i), d_xi_poly) in y_values.clone().into_iter().zip(v_values.clone()).zip(d_x_poly_values) {
+        let mut computed_batch_v = G::ScalarField::zero();
 
-            let mut t = v_i - &y_i;
-            t *= &cur_challenge;
+        for ((v_i, y_i), x_i) in v_values.clone().into_iter().zip(y_values.clone()).zip(points.clone()) {
 
-            let poly = &d_xi_poly / &d_x_poly;
-            sum_poly += (t, &poly);
+            computed_batch_v = computed_batch_v + &(cur_challenge * &((v_i - &y_i) / &(point - &x_i))); 
 
             cur_challenge = opening_challenges(opening_challenge_counter);
             opening_challenge_counter += 1;
         }
 
-        if !G::ScalarField::is_zero(&(sum_poly.coeffs[0] - &batch_proof.batch_v)) {
+        // Check assertion: v = SUM( lambda^i * (v_i - y_i) * (D_xi(X) / D(X)) )
+        if computed_batch_v != batch_proof.batch_v {
             return Ok(false);
         }
 
