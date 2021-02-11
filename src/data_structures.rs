@@ -17,7 +17,7 @@ pub trait PCUniversalParams: Clone + std::fmt::Debug {
 
 /// Defines the minimal interface of committer keys for any polynomial
 /// commitment scheme.
-pub trait PCCommitterKey: Clone + std::fmt::Debug {
+pub trait PCCommitterKey: Clone + std::fmt::Debug + Eq + PartialEq {
     /// Outputs the maximum degree supported by the universal parameters
     /// `Self` was derived from.
     fn max_degree(&self) -> usize;
@@ -28,7 +28,7 @@ pub trait PCCommitterKey: Clone + std::fmt::Debug {
 
 /// Defines the minimal interface of verifier keys for any polynomial
 /// commitment scheme.
-pub trait PCVerifierKey: Clone + std::fmt::Debug {
+pub trait PCVerifierKey: Clone + std::fmt::Debug + Eq + PartialEq {
     /// Outputs the maximum degree supported by the universal parameters
     /// `Self` was derived from.
     fn max_degree(&self) -> usize;

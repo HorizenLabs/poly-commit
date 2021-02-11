@@ -31,7 +31,9 @@ impl<G: AffineCurve> PCUniversalParams for UniversalParams<G> {
     Default(bound = ""),
     Hash(bound = ""),
     Clone(bound = ""),
-    Debug(bound = "")
+    Debug(bound = ""),
+    Eq(bound = ""),
+    PartialEq(bound = ""),
 )]
 pub struct CommitterKey<G: AffineCurve> {
     /// The key used to commit to polynomials.

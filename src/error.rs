@@ -82,6 +82,9 @@ pub enum Error {
 
     /// The commitment was generated incorrectly, tampered with, or doesn't support the polynomial.
     MalformedCommitment(String),
+
+    /// Failed succinct check
+    FailedSuccinctCheck,
 }
 
 impl std::fmt::Display for Error {
@@ -155,7 +158,8 @@ impl std::fmt::Display for Error {
                 degree_bound, label, poly_degree, supported_degree
             ),
             Error::IncorrectInputLength(err) => write!(f, "{}", err),
-            Error::MalformedCommitment(err) => write!(f, "{}", err)
+            Error::MalformedCommitment(err) => write!(f, "{}", err),
+            Error::FailedSuccinctCheck => write!(f, "Failed succinct check")
         }
     }
 }

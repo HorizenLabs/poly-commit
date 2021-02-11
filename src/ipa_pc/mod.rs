@@ -18,7 +18,6 @@ use rayon::prelude::*;
 use algebra_kernels::polycommit::{get_kernels, get_gpu_min_length};
 
 use digest::Digest;
-use algebra_utils::DensePolynomial;
 
 /// A polynomial commitment scheme based on the hardness of the
 /// discrete logarithm problem in prime-order groups.
@@ -184,6 +183,79 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         Some(check_poly)
     }
 
+    /// Perform the succinct check of proof, returning the succinct check polynomial
+    /// and the GFinal.
+    fn succinct_batch_check_individual_opening_challenges<'a, R: RngCore>(
+        vk: &VerifierKey<G>,
+        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Commitment<G>>>,
+        query_set: &QuerySet<G::ScalarField>,
+        values: &Evaluations<G::ScalarField>,
+        proof: &Vec<Proof<G>>,
+        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
+        rng: &mut R,
+    ) -> Result<(Polynomial<G::ScalarField>, G), Error>
+    {
+        let commitments: BTreeMap<_, _> = commitments.into_iter().map(|c| (c.label(), c)).collect();
+        let mut query_to_labels_map = BTreeMap::new();
+
+        for (label, (point_label, point)) in query_set.iter() {
+            let labels = query_to_labels_map
+                .entry(point_label)
+                .or_insert((point, BTreeSet::new()));
+            labels.1.insert(label);
+        }
+
+        assert_eq!(proof.len(), query_to_labels_map.len());
+
+        let mut randomizer = G::ScalarField::one();
+
+        let mut combined_check_poly = Polynomial::zero();
+        let mut combined_final_key = <G::Projective as ProjectiveCurve>::zero();
+
+        for ((_point_label, (point, labels)), p) in query_to_labels_map.into_iter().zip(proof) {
+            let lc_time =
+                start_timer!(|| format!("Randomly combining {} commitments", labels.len()));
+            let mut comms: Vec<&'_ LabeledCommitment<_>> = Vec::new();
+            let mut vals = Vec::new();
+            for label in labels.into_iter() {
+                let commitment = commitments.get(label).ok_or(Error::MissingPolynomial {
+                    label: label.to_string(),
+                })?;
+
+                let v_i = values
+                    .get(&(label.clone(), *point))
+                    .ok_or(Error::MissingEvaluation {
+                        label: label.to_string(),
+                    })?;
+
+                comms.push(commitment);
+                vals.push(*v_i);
+            }
+
+            let check_poly = Self::succinct_check(
+                vk,
+                comms.into_iter(),
+                *point,
+                vals.into_iter(),
+                p,
+                opening_challenges,
+            );
+
+            if check_poly.is_none() {
+                return Err(Error::FailedSuccinctCheck)
+            }
+
+            let check_poly =
+                Polynomial::from_coefficients_vec(check_poly.unwrap().compute_coeffs());
+            combined_check_poly += (randomizer, &check_poly);
+            combined_final_key += &p.final_comm_key.into_projective().mul(&randomizer);
+
+            randomizer = u128::rand(rng).into();
+            end_timer!(lc_time);
+        }
+        Ok((combined_check_poly, combined_final_key.into_affine()))
+    }
+
     fn check_degrees_and_bounds(
         supported_degree: usize,
         p: &LabeledPolynomial<G::ScalarField>,
@@ -304,152 +376,6 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
         G::Projective::batch_normalization_into_affine(generators)
     }
-
-    // "Naive approach" (if it can be useful)
-    // Assumption: the succinct check for each of the proof has been done outside,
-    // the h_poly for each of them is computed by using the xi_s, and all of them
-    // along with the g_finals are collected and passed to this function (memory heavy)
-    pub(crate) fn naive_batch_verify_dlog_hard_part<'a, R: RngCore>(
-        vk_gens: Vec<G>,
-        h_polys: impl IntoIterator<Item = &'a DensePolynomial<G::ScalarField>>,
-        g_finals: impl IntoIterator<Item = &'a G>,
-        rng: &mut R,
-    ) -> Result<bool, Error>
-    {
-        unimplemented!();
-    }
-
-    // "Memory optimized - final version" approach
-    // Assumption: the succinct check for each of the proof has been done outside,
-    // and all the xi_s vectors and the g_finals are collected and passed to this
-    // function (memory occupied by them is negligible).
-    // TODO: Can we achieve a higher degree of optimization by considering both
-    //       succinct check and dlog hard part ?
-    pub(crate) fn memory_optimized_batch_verify_dlog_hard_part<'a, R: RngCore>(
-        vk_gens: Vec<G>,
-        // The xi_s are collected in a struct called SuccinctCheckPolynomial; but
-        // the actual coefficients of the h polynomial, are obtained by calling
-        // the function compute_coeffs()
-        xi_s: impl IntoIterator<Item = &'a SuccinctCheckPolynomial<G::ScalarField>>,
-        g_finals: impl IntoIterator<Item = &'a G>,
-        rng: &mut R,
-    ) -> Result<bool, Error>
-    {
-        let lambda = G::ScalarField::rand(rng);
-
-        let mut batched_h_poly = DensePolynomial::from_coefficients_vec(vec![G::ScalarField::zero(); vk_gens.len()]);
-        let mut batched_g_fin = G::zero();
-        let mut lambda_i = G::ScalarField::one();
-
-        for (xi_s, g_fin) in xi_s.into_iter().zip(g_finals.into_iter())
-            {
-                // Compute the coefficients of the h_poly for the i-th proof
-                let mut h_poly_coeffs = xi_s.compute_coeffs();
-                assert!(h_poly_coeffs.len() <= vk_gens.len());
-
-                // Multiply h_poly coeffs for the i-th power of lambda
-                h_poly_coeffs.par_iter_mut(|coeff| *coeff *= lambda_i);
-
-                // Compute the h_poly itself
-                let mut h_poly = DensePolynomial::from_coefficients_vec(h_poly_coeffs);
-
-                // Add the i-th h_poly to the batched one
-                batched_h_poly += &h_poly;
-
-                // Multiply the i-th g_fin for the i-th power of lambda
-                let g_fin_times_lambda_i = g_fin.mul(lambda_i);
-
-                // Add the i-th g_fin to the batched one
-                batched_g_fin += g_fin_times_lambda_i;
-
-                // Compute next power of lambda
-                lambda_i *= lambda;
-            }
-
-        // Final MSM check
-        let expected_batched_g_fin = Self::cm_commit(
-            vk_gens.as_slice(),
-            batched_h_poly.coeffs.as_slice(),
-            None,
-            None,
-        );
-        if !ProjectiveCurve::is_zero(&(expected_batched_g_fin - &batched_g_fin.into_projective())) {
-            return Ok(false);
-        }
-        Ok(true)
-    }
-
-    /*
-    // "Memory optimized" approach. Has the succinct verifier inside.
-    // A little bit difficult to test and maybe not needed, unless you plan to do some
-    // specific optimizations involving the succinct verifier, or if you want to bench
-    // taking also into consideration the time for the succinct part. If you want it's here.
-    pub(crate) fn memory_optimized_batch_verify_dlog_hard_part<'a, R: RngCore>(
-        vk: &VerifierKey<G>,
-        commitments: impl IntoIterator<Item = &'a [LabeledCommitment<Commitment<G>>]>,
-        points: impl IntoIterator<Item = G::ScalarField>,
-        values: impl IntoIterator<Item = Vec<G::ScalarField>>,
-        proofs: impl IntoIterator<Item = &'a Proof<G>>,
-        opening_challenges: impl IntoIterator<Item = &'a dyn Fn(u64) -> G::ScalarField>,
-        ros: impl IntoIterator<Item = &'a mut FS>,
-        rng: &mut R,
-    ) -> Result<bool, Error>
-    {
-        let lambda = G::ScalarField::rand(&mut rng);
-
-        let mut batched_h_poly = DensePolynomial::from_coefficients_vec(vec![G::ScalarField::zero(); vk.max_degree + 1]);
-        let mut batched_g_fin = G::zero();
-        let mut lambda_i = G::ScalarField::one();
-
-        for (comms, (point, (values, (proof, (opening_challenges, (ro)))))) in commitments.into_iter()
-            .zip(points.into_iter())
-            .zip(values.into_iter())
-            .zip(proof.into_iter())
-            .zip(opening_challenges.into_iter())
-            .zip(ros.into_iter())
-        {
-            // Compute the xi_s for the i-th proof
-            let xi_s = Self::succinct_check(vk, comms, point, values, proof, opening_challenges, ro);
-            if xi_s.is_none() {
-                return Ok(false);
-            }
-
-            // Compute the coefficients of the h_poly for the i-th proof
-            // NOTE: Omit this step for "final version" approach and work directly on the xi_s
-            let mut h_poly_coeffs = xi_s.unwrap().compute_coeffs();
-            assert!(h_poly_coeffs.len() <= vk.max_degree + 1);
-
-            // Multiply h_poly coeffs for the i-th power of lambda
-            h_poly_coeffs.par_iter_mut(|coeff| *coeff *= lambda_i);
-
-            // Compute the h_poly itself
-            let mut h_poly = DensePolynomial::from_coefficients_vec(h_poly_coeffs);
-
-            // Add the i-th h_poly to the batched one
-            batched_h_poly += &h_poly;
-
-            // Multiply the i-th g_fin for the i-th power of lambda
-            let g_fin = proof.final_comm_key.mul(lambda_i);
-
-            // Add the i-th g_fin to the batched one
-            batched_g_fin += g_fin;
-
-            // Compute next power of lambda
-            lambda_i *= lambda;
-        }
-
-        // Final MSM check
-        let expected_batched_g_fin = Self::cm_commit(
-            vk.comm_key.as_slice(),
-            batched_h_poly.coeffs.as_slice(),
-            None,
-            None,
-        );
-        if !ProjectiveCurve::is_zero(&(expected_batched_g_fin - &batched_g_fin.into_projective())) {
-            return Ok(false);
-        }
-    }
-    */
 
     /// Perform bullet reduce at the commitment last stage
     fn polycommit_round_reduce(
@@ -946,66 +872,116 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
     where
         Self::Commitment: 'a,
     {
-        let commitments: BTreeMap<_, _> = commitments.into_iter().map(|c| (c.label(), c)).collect();
-        let mut query_to_labels_map = BTreeMap::new();
+        // DLOG succinct verifier
+        let (combined_check_poly, combined_final_key) = Self::succinct_batch_check_individual_opening_challenges(
+            vk,
+            commitments,
+            query_set,
+            values,
+            proof,
+            opening_challenges,
+            rng
+        )?;
 
-        for (label, (point_label, point)) in query_set.iter() {
-            let labels = query_to_labels_map
-                .entry(point_label)
-                .or_insert((point, BTreeSet::new()));
-            labels.1.insert(label);
-        }
-
-        assert_eq!(proof.len(), query_to_labels_map.len());
-
-        let mut randomizer = G::ScalarField::one();
-
-        let mut combined_check_poly = Polynomial::zero();
-        let mut combined_final_key = <G::Projective as ProjectiveCurve>::zero();
-
-        for ((_point_label, (point, labels)), p) in query_to_labels_map.into_iter().zip(proof) {
-            let lc_time =
-                start_timer!(|| format!("Randomly combining {} commitments", labels.len()));
-            let mut comms: Vec<&'_ LabeledCommitment<_>> = Vec::new();
-            let mut vals = Vec::new();
-            for label in labels.into_iter() {
-                let commitment = commitments.get(label).ok_or(Error::MissingPolynomial {
-                    label: label.to_string(),
-                })?;
-
-                let v_i = values
-                    .get(&(label.clone(), *point))
-                    .ok_or(Error::MissingEvaluation {
-                        label: label.to_string(),
-                    })?;
-
-                comms.push(commitment);
-                vals.push(*v_i);
-            }
-
-            let check_poly = Self::succinct_check(
-                vk,
-                comms.into_iter(),
-                *point,
-                vals.into_iter(),
-                p,
-                opening_challenges,
-            );
-
-            if check_poly.is_none() {
-                return Ok(false);
-            }
-
-            let check_poly =
-                Polynomial::from_coefficients_vec(check_poly.unwrap().compute_coeffs());
-            combined_check_poly += (randomizer, &check_poly);
-            combined_final_key += &p.final_comm_key.into_projective().mul(&randomizer);
-
-            randomizer = u128::rand(rng).into();
-            end_timer!(lc_time);
-        }
-
+        // DLOG hard part
         let proof_time = start_timer!(|| "Checking batched proof");
+        let final_key = Self::cm_commit(
+            vk.comm_key.as_slice(),
+            combined_check_poly.coeffs.as_slice(),
+            None,
+            None,
+        );
+        if !ProjectiveCurve::is_zero(&(final_key - &combined_final_key.into_projective())) {
+            return Ok(false);
+        }
+
+        end_timer!(proof_time);
+
+        Ok(true)
+    }
+
+    /// Batch check batch proofs.
+    /// NOTE: Currently, this is equivalent (a little bit more optimized) to
+    /// batch_check_individual_opening_challenges(), but just because a Self::BatchProof
+    /// is simply a Vec<Self::Proof>; in this regard, the function above can be seen as
+    /// a batch verification of multiple Self::Proof(s).
+    /// In the future we will implement Boneh, Gabizon, et. al multi poly multi point
+    /// opening proof, and the two functions will differ: this is is
+    /// a batch verification of multiple Self::BatchProof(s)
+    fn batch_check_batch_proofs<'a, R: RngCore>(
+        vk: &Self::VerifierKey,
+        commitments: impl IntoIterator<Item = &'a [LabeledCommitment<Self::Commitment>]>,
+        query_sets: impl IntoIterator<Item = &'a QuerySet<'a, G::ScalarField>>,
+        values: impl IntoIterator<Item = &'a Evaluations<'a, G::ScalarField>>,
+        proofs: impl IntoIterator<Item = &'a Self::BatchProof>,
+        opening_challenges: impl IntoIterator<Item = G::ScalarField>,
+        rng: &mut R,
+    ) -> Result<bool, Self::Error>
+        where
+            Self::Commitment: 'a,
+            Self::BatchProof: 'a,
+    {
+        let mut check_polys = Vec::new();
+        let mut final_comm_keys = Vec::new();
+
+        let succinct_time = start_timer!(|| format!("Succinct verification of proofs"));
+        for ((((commitments, query_set), values), proof), opening_challenge) in commitments.into_iter()
+            .zip(query_sets.into_iter())
+            .zip(values.into_iter())
+            .zip(proofs.into_iter())
+            .zip(opening_challenges.into_iter())
+        {
+            let opening_challenge_f = |pow| opening_challenge.pow(&[pow]);
+            let (check_poly, final_comm_key) = Self::succinct_batch_check_individual_opening_challenges(
+                vk,
+                commitments,
+                query_set,
+                values,
+                proof,
+                &opening_challenge_f,
+                rng
+            )?;
+
+            check_polys.push(check_poly);
+            final_comm_keys.push(final_comm_key);
+        }
+
+        assert_eq!(check_polys.len(), final_comm_keys.len());
+        end_timer!(succinct_time);
+
+        let batching_time = start_timer!(|| "Combine check polynomials and final comm keys");
+
+        // Sample batching challenge
+        let mut batching_chal = G::ScalarField::rand(rng);
+
+        // Collect the powers of the batching challenge in a vector
+        let mut batching_chal_pows = vec![G::ScalarField::one(); check_polys.len()];
+        for i in 1..batching_chal_pows.len() {
+            batching_chal_pows[i] = batching_chal;
+            batching_chal *= batching_chal;
+        }
+
+        // Compute the combined final key: MSM(final_comm_keys, batching_chal_pows)
+        let combined_final_key = Self::cm_commit(
+            final_comm_keys.as_slice(),
+            batching_chal_pows.as_slice(),
+            None,
+            None
+        );
+
+        // Compute the combined_check_poly
+        let combined_check_poly = batching_chal_pows
+            .into_par_iter()
+            .zip(check_polys)
+            .map(|(chal, poly)| {
+                let mut temp = Polynomial::zero();
+                temp += (chal, &poly);
+                temp
+            }).reduce(|| Polynomial::zero(), |acc, scaled_poly| &acc + &scaled_poly);
+        end_timer!(batching_time);
+
+        // DLOG hard part
+        let hard_time = start_timer!(|| "Verify hard part using batched check poly and batched final comm key");
         let final_key = Self::cm_commit(
             vk.comm_key.as_slice(),
             combined_check_poly.coeffs.as_slice(),
@@ -1015,8 +991,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         if !ProjectiveCurve::is_zero(&(final_key - &combined_final_key)) {
             return Ok(false);
         }
-
-        end_timer!(proof_time);
+        end_timer!(hard_time);
 
         Ok(true)
     }
@@ -1281,6 +1256,13 @@ mod tests {
     fn full_end_to_end_test() {
         use crate::tests::*;
         full_end_to_end_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
+        println!("Finished tweedle_dee-blake2s");
+    }
+
+    #[test]
+    fn batch_check_batch_proof_test() {
+        use crate::tests::*;
+        batch_check_batch_proof_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
 
