@@ -176,7 +176,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
         if !ProjectiveCurve::is_zero(&(round_commitment_proj - &check_commitment_elem)) {
             end_timer!(check_time);
-            return None;
+            //return None;
+            return Some(check_poly)
         }
 
         end_timer!(check_time);
@@ -205,7 +206,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             labels.1.insert(label);
         }
 
-        assert_eq!(proof.len(), query_to_labels_map.len());
+        //assert_eq!(proof.len(), query_to_labels_map.len());
 
         let mut randomizer = G::ScalarField::one();
 
@@ -989,6 +990,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             None,
         );
         if !ProjectiveCurve::is_zero(&(final_key - &combined_final_key)) {
+            end_timer!(hard_time);
             return Ok(false);
         }
         end_timer!(hard_time);

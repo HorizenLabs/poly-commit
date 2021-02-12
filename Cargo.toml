@@ -26,20 +26,29 @@ bench-utils = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch =
 rand_core = { version = "0.5", default-features = false }
 digest = "0.8"
 rayon = { version = "1" }
-derivative = { version = "2", features = [ "use_core" ] }
+derivative = { version = "2" }
 
 # gpu feature
 algebra-kernels = {git = "https://github.com/HorizenOfficial/ginger-algebra-ocl", branch = "ginger_ocl", optional = true }
 
 [dev-dependencies]
-rand = { version = "0.7", default-features = false }
 algebra = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "algebra_ocl", features = ["bls12_381", "jubjub", "bn_382", "bls12_377", "tweedle"] }
+
+rand = { version = "0.7", default-features = false }
+criterion = "0.3"
+rand_xorshift = "0.2"
 blake2 = { version = "0.8", default-features = false }
 
 [features]
 asm = [ "algebra/llvm_asm" ]
 print-trace = [ "bench-utils/print-trace" ]
 gpu = [ "algebra-kernels", "algebra-utils/gpu" ]
+
+[[bench]]
+name = "tweedle_batch_verify_batch_proofs"
+path = "benches/batch_proof_batch_verify.rs"
+harness = false
+required-features = ["asm", "algebra/parallel", "algebra/tweedle"]
 
 [profile.release]
 opt-level = 3
