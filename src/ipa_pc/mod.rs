@@ -1056,7 +1056,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         )?;
 
         // DLOG hard part
-        let check_time = start_timer!("DLOG hard part");
+        let check_time = start_timer!(|| "DLOG hard part");
         let check_poly_coeffs = check_poly.compute_coeffs();
         let final_key = Self::cm_commit(
             vk.comm_key.as_slice(),

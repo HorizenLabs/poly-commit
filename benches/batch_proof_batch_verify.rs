@@ -2,7 +2,7 @@ use algebra::{Field, AffineCurve, ProjectiveCurve, UniformRand};
 use rand::{thread_rng, RngCore, SeedableRng};
 use std::marker::PhantomData;
 use poly_commit::{PCVerifierKey, PolynomialCommitment, LabeledCommitment, Evaluations, QuerySet};
-use poly_commit::ipa_pc::{InnerProductArgPC, Commitment, Proof, VerifierKey};
+use poly_commit::ipa_pc::{InnerProductArgPC, Commitment, Proof, VerifierKey, BatchProof};
 use digest::Digest;
 use criterion::*;
 use rand_xorshift::XorShiftRng;
@@ -120,13 +120,18 @@ where
             hiding_comm: if hiding_bound { Some(G::Projective::rand(rng).into_affine()) } else { None },
             rand: if hiding_bound { Some(G::ScalarField::rand(rng)) } else { None },
         };
+        let batch_proof = BatchProof::<G> {
+            proof,
+            batch_commitment: G::Projective::rand(rng).into_affine(),
+            batch_values: vec![G::ScalarField::rand(rng); num_commitments],
+        };
 
         Self {
             vk: vk.clone(),
             comms: labeled_comms,
             query_set,
             values,
-            proof: vec![proof],
+            proof: batch_proof,
             opening_challenge,
             _m: PhantomData
         }
@@ -138,12 +143,12 @@ fn bench_batch_verify_batch_proofs<G: AffineCurve, D: Digest>(c: &mut Criterion,
     let mut group = c.benchmark_group(bench_name);
 
     let info = BenchInfo {
-        max_degree: 1 << 17,
-        supported_degree: 1 << 17,
-        num_commitments: 30,
-        degree_bounds: vec![false; 30],
+        max_degree: 1 << 21,
+        supported_degree: 1 << 21,
+        num_commitments: 23,
+        degree_bounds: vec![false; 23],
         hiding_bound: true,
-        num_queries: 1
+        num_queries: 5
     };
     let vk = BenchVerifierData::<G::ScalarField, InnerProductArgPC<G, D>>::generate_vk(rng, &info);
 
