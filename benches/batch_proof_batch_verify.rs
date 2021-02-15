@@ -133,11 +133,9 @@ where
     }
 }
 
-fn bench_batch_verify_batch_proofs<G: AffineCurve, D: Digest>(c: &mut Criterion) {
+fn bench_batch_verify_batch_proofs<G: AffineCurve, D: Digest>(c: &mut Criterion, bench_name: &str) {
     let rng = &mut XorShiftRng::seed_from_u64(1234567890u64);
-    let mut group = c.benchmark_group(
-        "batch verification of batch proofs in tweedle-dee"
-    );
+    let mut group = c.benchmark_group(bench_name);
 
     let info = BenchInfo {
         max_degree: 1 << 17,
@@ -203,11 +201,11 @@ use algebra::curves::tweedle::{
     };
 
 fn bench_batch_verify_batch_proofs_tweedle_dee(c: &mut Criterion) {
-    bench_batch_verify_batch_proofs::<TweedleDee, Blake2s>(c);
+    bench_batch_verify_batch_proofs::<TweedleDee, Blake2s>(c, "batch verification of batch proofs in tweedle-dee");
 }
 
 fn bench_batch_verify_batch_proofs_tweedle_dum(c: &mut Criterion) {
-    bench_batch_verify_batch_proofs::<TweedleDum, Blake2s>(c);
+    bench_batch_verify_batch_proofs::<TweedleDum, Blake2s>(c, "batch verification of batch proofs in tweedle-dum");
 }
 
 criterion_group!(

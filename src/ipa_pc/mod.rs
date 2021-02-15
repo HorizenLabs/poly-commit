@@ -176,29 +176,29 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
         if !ProjectiveCurve::is_zero(&(round_commitment_proj - &check_commitment_elem)) {
             end_timer!(check_time);
-            //return None;
-            return Some(check_poly)
+            return None;
+            //return Some(check_poly)
         }
 
         end_timer!(check_time);
         Some(check_poly)
     }
 
-    /// Perform the succinct check of proof, returning the succinct check polynomial
+    /// Perform the succinct check of proof, returning the succinct check polynomial (the xi_s)
     /// and the GFinal.
     fn succinct_batch_check_individual_opening_challenges<'a, R: RngCore>(
         vk: &VerifierKey<G>,
-        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Commitment<G>>>,
+        commitments: impl Clone + IntoIterator<Item = &'a LabeledCommitment<Commitment<G>>>,
         query_set: &QuerySet<G::ScalarField>,
         values: &Evaluations<G::ScalarField>,
-        proof: &Vec<Proof<G>>,
+        batch_proof: &BatchProof<G>,
         opening_challenges: &dyn Fn(u64) -> G::ScalarField,
-        rng: &mut R,
-    ) -> Result<(Polynomial<G::ScalarField>, G), Error>
+        _rng: &mut R,
+    ) -> Result<(SuccinctCheckPolynomial<G::ScalarField>, G), Error>
     {
-        let commitments: BTreeMap<_, _> = commitments.into_iter().map(|c| (c.label(), c)).collect();
-        let mut query_to_labels_map = BTreeMap::new();
+        let batch_check_time = start_timer!(|| "Multi poly multi point batch check: succinct part");
 
+        let mut query_to_labels_map = BTreeMap::new();
         for (label, (point_label, point)) in query_set.iter() {
             let labels = query_to_labels_map
                 .entry(point_label)
@@ -206,55 +206,96 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             labels.1.insert(label);
         }
 
-        //assert_eq!(proof.len(), query_to_labels_map.len());
+        // v_i values
+        let mut v_values = batch_proof.batch_values.clone();
 
-        let mut randomizer = G::ScalarField::one();
+        // y_i vallues
+        let mut y_values = vec![];
 
-        let mut combined_check_poly = Polynomial::zero();
-        let mut combined_final_key = <G::Projective as ProjectiveCurve>::zero();
+        // x_i values
+        let mut points = vec![];
 
-        for ((_point_label, (point, labels)), p) in query_to_labels_map.into_iter().zip(proof) {
-            let lc_time =
-                start_timer!(|| format!("Randomly combining {} commitments", labels.len()));
-            let mut comms: Vec<&'_ LabeledCommitment<_>> = Vec::new();
-            let mut vals = Vec::new();
+        for (_point_label, (point, labels)) in query_to_labels_map.into_iter() {
             for label in labels.into_iter() {
-                let commitment = commitments.get(label).ok_or(Error::MissingPolynomial {
-                    label: label.to_string(),
-                })?;
-
-                let v_i = values
+                let y_i = values
                     .get(&(label.clone(), *point))
                     .ok_or(Error::MissingEvaluation {
                         label: label.to_string(),
                     })?;
-
-                comms.push(commitment);
-                vals.push(*v_i);
+                y_values.push(*y_i);
             }
-
-            let check_poly = Self::succinct_check(
-                vk,
-                comms.into_iter(),
-                *point,
-                vals.into_iter(),
-                p,
-                opening_challenges,
-            );
-
-            if check_poly.is_none() {
-                return Err(Error::FailedSuccinctCheck)
-            }
-
-            let check_poly =
-                Polynomial::from_coefficients_vec(check_poly.unwrap().compute_coeffs());
-            combined_check_poly += (randomizer, &check_poly);
-            combined_final_key += &p.final_comm_key.into_projective().mul(&randomizer);
-
-            randomizer = u128::rand(rng).into();
-            end_timer!(lc_time);
+            points.push(point);
         }
-        Ok((combined_check_poly, combined_final_key.into_affine()))
+
+        // Commitment of the h(X) polynomial
+        let batch_commitment = batch_proof.batch_commitment;
+
+        // Fresh random challenge x
+        let point = Self::compute_random_oracle_challenge(
+            &to_bytes![
+                batch_commitment,
+                points
+            ]
+                .unwrap(),
+        );
+
+        let mut opening_challenge_counter = 0;
+
+        // lambda
+        let mut cur_challenge = opening_challenges(opening_challenge_counter);
+        opening_challenge_counter += 1;
+
+        let mut computed_batch_v = G::ScalarField::zero();
+
+        for ((v_i, y_i), x_i) in v_values.clone().into_iter().zip(y_values.clone()).zip(points.clone()) {
+
+            computed_batch_v = computed_batch_v + &(cur_challenge * &((v_i - &y_i) / &(point - x_i)));
+
+            cur_challenge = opening_challenges(opening_challenge_counter);
+            opening_challenge_counter += 1;
+        }
+
+        v_values.push(computed_batch_v);
+
+        let mut commitments = commitments.clone().into_iter().collect::<Vec<&'a LabeledCommitment<Commitment<G>>>>();
+        let labeled_batch_commitment = LabeledCommitment::new(
+            format!("Batch"),
+            Commitment { comm: batch_commitment, shifted_comm: None },
+            None
+        );
+        commitments.push(&labeled_batch_commitment);
+
+        end_timer!(batch_check_time);
+
+        let proof = &batch_proof.proof;
+
+        let check_time = start_timer!(|| "Checking evaluations");
+        let d = vk.supported_degree();
+
+        // `log_d` is ceil(log2 (d + 1)), which is the number of steps to compute all of the challenges
+        let log_d = algebra::log2(d + 1) as usize;
+
+        if proof.l_vec.len() != proof.r_vec.len() || proof.l_vec.len() != log_d {
+            return Err(Error::IncorrectInputLength(
+                format!(
+                    "Expected proof vectors to be {:}. Instead, l_vec size is {:} and r_vec size is {:}",
+                    log_d,
+                    proof.l_vec.len(),
+                    proof.r_vec.len()
+                )
+            ));
+        }
+
+        let check_poly = Self::succinct_check(vk, commitments, point, v_values, proof, opening_challenges);
+
+        if check_poly.is_none() {
+            end_timer!(check_time);
+            return Err(Error::FailedSuccinctCheck);
+        }
+
+        end_timer!(check_time);
+
+        Ok((check_poly.unwrap(), proof.final_comm_key))
     }
 
     fn check_degrees_and_bounds(
@@ -437,7 +478,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
     type PreparedCommitment = PreparedCommitment<G>;
     type Randomness = Randomness<G>;
     type Proof = Proof<G>;
-    type BatchProof = Vec<Self::Proof>;
+    type BatchProof = BatchProof<G>;
     type Error = Error;
 
     fn setup<R: RngCore>(
@@ -810,6 +851,136 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         })
     }
 
+    /// Refers to the "Multi-poly multi-point assertions" section of the "Recursive SNARKs based on Marlin" document
+    fn batch_open_individual_opening_challenges<'a>(
+        ck: &Self::CommitterKey,
+        labeled_polynomials: impl Clone + IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
+        commitments: impl Clone + IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
+        query_set: &QuerySet<G::ScalarField>,
+        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
+        rands: impl Clone + IntoIterator<Item = &'a Self::Randomness>,
+        rng: Option<&mut dyn RngCore>,
+    ) -> Result<Self::BatchProof, Self::Error>
+    where
+        Self::Randomness: 'a,
+        Self::Commitment: 'a,
+    {
+        let batch_time = start_timer!(|| "Multi poly multi point batching.");
+
+        let polys_iter = labeled_polynomials.clone().into_iter();
+
+        let mut opening_challenge_counter = 0;
+        
+        // lambda
+        let mut cur_challenge = opening_challenges(opening_challenge_counter);
+        opening_challenge_counter += 1;
+
+        let mut query_to_labels_map = BTreeMap::new();
+
+        for (label, (point_label, point)) in query_set.iter() {
+            let labels = query_to_labels_map
+                .entry(point_label)
+                .or_insert((point, BTreeSet::new()));
+            labels.1.insert(label);
+        }
+
+        let mut points = vec![];
+
+        // h(X)
+        let mut batch_polynomial = Polynomial::zero();
+
+        for (
+            (_point_label, (point, _labels)), 
+            labeled_polynomial
+        ) in query_to_labels_map.into_iter().zip(polys_iter) {
+
+            points.push(point);
+
+            // y_i
+            let evaluated_y = labeled_polynomial.polynomial().evaluate(*point); 
+
+            // (p_i(X) - y_i) / (X - x_i)
+            let polynomial = 
+            &(labeled_polynomial.polynomial() - &Polynomial::from_coefficients_vec(vec![evaluated_y])) 
+            / 
+            &Polynomial::from_coefficients_vec(vec![
+                (G::ScalarField::zero() - point),
+                G::ScalarField::one()
+            ]);
+            
+            // h(X) = SUM( lambda^i * ((p_i(X) - y_i) / (X - x_i)) )
+            batch_polynomial += (cur_challenge, &polynomial);
+
+            // lambda^i
+            cur_challenge = opening_challenges(opening_challenge_counter);
+            opening_challenge_counter += 1;
+        }
+
+        // Commitment of the h(X) polynomial
+        let batch_commitment = Self::cm_commit(
+            ck.comm_key.as_slice(),
+            batch_polynomial.coeffs.as_slice(),
+            None,
+            None,
+        ).into_affine();
+
+        // Fresh random challenge x
+        let point= Self::compute_random_oracle_challenge(
+            &to_bytes![
+                batch_commitment,
+                points                
+            ]
+            .unwrap(),
+        );
+
+        // Values: v_i = p_i(x), where x is fresh random challenge
+        let mut batch_values = vec![];
+        for labeled_polynomial in labeled_polynomials.clone().into_iter() {
+            batch_values.push(labeled_polynomial.polynomial().evaluate(point));
+        }
+
+        // h(X) polynomial added to the set of polynomials for multi-poly single-point batching
+        let mut labeled_polynomials = labeled_polynomials.clone().into_iter().collect::<Vec<&'a LabeledPolynomial<G::ScalarField>>>();
+        let labeled_batch_polynomial = LabeledPolynomial::new(
+            format!("Batch"),
+            batch_polynomial,
+            None,
+            None
+        );
+        labeled_polynomials.push(&labeled_batch_polynomial);
+
+        // Commitment of h(X) polynomial added to the set of polynomials for multi-poly single-point batching
+        let mut commitments = commitments.clone().into_iter().collect::<Vec<&'a LabeledCommitment<Self::Commitment>>>();
+        let labeled_batch_commitment = LabeledCommitment::new(
+            format!("Batch"),
+            Commitment { comm: batch_commitment, shifted_comm: None },
+            None
+        );
+        commitments.push(&labeled_batch_commitment);
+
+        let mut rands = rands.clone().into_iter().collect::<Vec<&'a Self::Randomness>>();
+        let batch_randomness = Randomness::empty();
+        rands.push(&batch_randomness);
+
+        end_timer!(batch_time);
+
+        let proof = Self::open_individual_opening_challenges(
+            ck,
+            labeled_polynomials,
+            commitments,
+            point,
+            opening_challenges,
+            rands,
+            rng
+        )?;
+
+        Ok(BatchProof {
+            proof,
+            batch_commitment,
+            batch_values
+        })
+    }
+
     fn check_individual_opening_challenges<'a>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
@@ -863,52 +1034,46 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
     fn batch_check_individual_opening_challenges<'a, R: RngCore>(
         vk: &Self::VerifierKey,
-        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
+        commitments: impl Clone + IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<G::ScalarField>,
-        values: &Evaluations<G::ScalarField>,
-        proof: &Self::BatchProof,
+        evaluations: &Evaluations<G::ScalarField>,
+        batch_proof: &Self::BatchProof,
         opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rng: &mut R,
     ) -> Result<bool, Self::Error>
     where
         Self::Commitment: 'a,
     {
-        // DLOG succinct verifier
-        let (combined_check_poly, combined_final_key) = Self::succinct_batch_check_individual_opening_challenges(
+        // DLOG "succinct" part
+        let (check_poly, proof_final_key) = Self::succinct_batch_check_individual_opening_challenges(
             vk,
             commitments,
             query_set,
-            values,
-            proof,
+            evaluations,
+            batch_proof,
             opening_challenges,
             rng
         )?;
 
         // DLOG hard part
-        let proof_time = start_timer!(|| "Checking batched proof");
+        let check_time = start_timer!("DLOG hard part");
+        let check_poly_coeffs = check_poly.compute_coeffs();
         let final_key = Self::cm_commit(
             vk.comm_key.as_slice(),
-            combined_check_poly.coeffs.as_slice(),
+            check_poly_coeffs.as_slice(),
             None,
             None,
         );
-        if !ProjectiveCurve::is_zero(&(final_key - &combined_final_key.into_projective())) {
+        if !ProjectiveCurve::is_zero(&(final_key - &proof_final_key.into_projective())) {
+            end_timer!(check_time);
             return Ok(false);
         }
 
-        end_timer!(proof_time);
-
+        end_timer!(check_time);
         Ok(true)
     }
 
-    /// Batch check batch proofs.
-    /// NOTE: Currently, this is equivalent (a little bit more optimized) to
-    /// batch_check_individual_opening_challenges(), but just because a Self::BatchProof
-    /// is simply a Vec<Self::Proof>; in this regard, the function above can be seen as
-    /// a batch verification of multiple Self::Proof(s).
-    /// In the future we will implement Boneh, Gabizon, et. al multi poly multi point
-    /// opening proof, and the two functions will differ: this is is
-    /// a batch verification of multiple Self::BatchProof(s)
+    /// Batch verification of multiple Self::BatchProof(s)
     fn batch_check_batch_proofs<'a, R: RngCore>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a [LabeledCommitment<Self::Commitment>]>,
@@ -922,10 +1087,11 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             Self::Commitment: 'a,
             Self::BatchProof: 'a,
     {
-        let mut check_polys = Vec::new();
+        let mut xi_s_vec = Vec::new();
         let mut final_comm_keys = Vec::new();
 
         let succinct_time = start_timer!(|| format!("Succinct verification of proofs"));
+        //TODO: Parallelize
         for ((((commitments, query_set), values), proof), opening_challenge) in commitments.into_iter()
             .zip(query_sets.into_iter())
             .zip(values.into_iter())
@@ -933,7 +1099,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             .zip(opening_challenges.into_iter())
         {
             let opening_challenge_f = |pow| opening_challenge.pow(&[pow]);
-            let (check_poly, final_comm_key) = Self::succinct_batch_check_individual_opening_challenges(
+            let (xi_s, final_comm_key) = Self::succinct_batch_check_individual_opening_challenges(
                 vk,
                 commitments,
                 query_set,
@@ -943,58 +1109,55 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 rng
             )?;
 
-            check_polys.push(check_poly);
+            xi_s_vec.push(xi_s);
             final_comm_keys.push(final_comm_key);
         }
 
-        assert_eq!(check_polys.len(), final_comm_keys.len());
+        assert_eq!(xi_s_vec.len(), final_comm_keys.len());
         end_timer!(succinct_time);
 
         let batching_time = start_timer!(|| "Combine check polynomials and final comm keys");
 
         // Sample batching challenge
-        let mut batching_chal = G::ScalarField::rand(rng);
+        let random_scalar = G::ScalarField::rand(rng);
+        let mut batching_chal = G::ScalarField::one();
 
         // Collect the powers of the batching challenge in a vector
-        let mut batching_chal_pows = vec![G::ScalarField::one(); check_polys.len()];
-        for i in 1..batching_chal_pows.len() {
+        let mut batching_chal_pows = vec![G::ScalarField::zero(); xi_s_vec.len()];
+        for i in 0..batching_chal_pows.len() {
             batching_chal_pows[i] = batching_chal;
-            batching_chal *= batching_chal;
+            batching_chal *= &random_scalar;
         }
 
-        // Compute the combined final key: MSM(final_comm_keys, batching_chal_pows)
-        let combined_final_key = Self::cm_commit(
-            final_comm_keys.as_slice(),
-            batching_chal_pows.as_slice(),
-            None,
-            None
-        );
-
         // Compute the combined_check_poly
-        let combined_check_poly = batching_chal_pows
+        let combined_check_poly = batching_chal_pows.clone()
             .into_par_iter()
-            .zip(check_polys)
-            .map(|(chal, poly)| {
+            .zip(xi_s_vec)
+            .map(|(chal, xi_s)| {
                 let mut temp = Polynomial::zero();
-                temp += (chal, &poly);
+                let check_poly = Polynomial::from_coefficients_vec(xi_s.compute_coeffs());
+                temp += (-chal, &check_poly);
                 temp
             }).reduce(|| Polynomial::zero(), |acc, scaled_poly| &acc + &scaled_poly);
         end_timer!(batching_time);
 
-        // DLOG hard part
-        let hard_time = start_timer!(|| "Verify hard part using batched check poly and batched final comm key");
-        let final_key = Self::cm_commit(
-            vk.comm_key.as_slice(),
-            combined_check_poly.coeffs.as_slice(),
+        // DLOG hard part.
+        // The equation to check would be:
+        // lambda_1 * gfin_1 + ... + lambda_n * gfin_n - combined_h_1 * g_vk_1 - ... - combined_h_m * g_vk_m = 0
+        // Where combined_h_i = lambda_1 * h_1_i + ... + lambda_n * h_n_i
+        // We do final verification and the batching of the GFin in a single MSM
+        let hard_time = start_timer!(|| "Batch verify hard parts");
+        let final_val = Self::cm_commit(
+            &[final_comm_keys.as_slice(), vk.comm_key.as_slice()].concat(),
+            &[batching_chal_pows.as_slice(), combined_check_poly.coeffs.as_slice()].concat(),
             None,
             None,
         );
-        if !ProjectiveCurve::is_zero(&(final_key - &combined_final_key)) {
+        if !ProjectiveCurve::is_zero(&final_val) {
             end_timer!(hard_time);
             return Ok(false);
         }
         end_timer!(hard_time);
-
         Ok(true)
     }
 
