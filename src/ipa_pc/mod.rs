@@ -817,6 +817,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             None,
         ).into_affine();
 
+        // TODO: When we will move to Sponge-based construction, we will absorb the batch_commitment only and then squeeze a new challenge
         // Fresh random challenge x
         let point= Self::compute_random_oracle_challenge(
             &to_bytes![
@@ -981,6 +982,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         // Commitment of the h(X) polynomial
         let batch_commitment = batch_proof.batch_commitment;
 
+
+        // TODO: When we will move to Sponge-based construction, we will absorb the batch_commitment only and then squeeze a new challenge
         // Fresh random challenge x
         let point = Self::compute_random_oracle_challenge(
             &to_bytes![
