@@ -796,7 +796,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                     &(labeled_polynomial.polynomial() - &Polynomial::from_coefficients_vec(vec![evaluated_y])) 
                     / 
                     &Polynomial::from_coefficients_vec(vec![
-                        (G::ScalarField::zero() - &point), 
+                        (G::ScalarField::zero() - point), 
                         G::ScalarField::one()
                     ]);
                 
@@ -1000,7 +1000,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         for ((v_i, y_i), x_i) in v_values.clone().into_iter().zip(y_values).zip(points) {
 
-            computed_batch_v = computed_batch_v + &(cur_challenge * &((v_i - &y_i) / &(point - &x_i))); 
+            computed_batch_v = computed_batch_v + &(cur_challenge * &((v_i - &y_i) / &(point - x_i))); 
 
             cur_challenge = opening_challenges(opening_challenge_counter);
             opening_challenge_counter += 1;
