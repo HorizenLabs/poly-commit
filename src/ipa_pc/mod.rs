@@ -752,8 +752,6 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
     {
         let batch_time = start_timer!(|| "Multi poly multi point batching.");
 
-        let polys_iter = labeled_polynomials.clone().into_iter();
-
         let mut opening_challenge_counter = 0;
         
         // lambda
@@ -761,6 +759,12 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         opening_challenge_counter += 1;
 
         let mut query_to_labels_map = BTreeMap::new();
+
+        let poly_map: BTreeMap<_, _> = labeled_polynomials
+            .clone()
+            .into_iter()
+            .map(|poly| (poly.label(), poly))
+            .collect();
 
         for (label, (point_label, point)) in query_set.iter() {
             let labels = query_to_labels_map
@@ -775,30 +779,36 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let mut batch_polynomial = Polynomial::zero();
 
         for (
-            (_point_label, (point, _labels)), 
-            labeled_polynomial
-        ) in query_to_labels_map.into_iter().zip(polys_iter) {
+            _point_label, (point, labels), 
+        ) in query_to_labels_map.into_iter() {
 
-            points.push(point);
+            for label in labels {
+                let labeled_polynomial =
+                    poly_map.get(label).ok_or(Error::MissingPolynomial {
+                        label: label.to_string(),
+                    })?;
 
-            // y_i
-            let evaluated_y = labeled_polynomial.polynomial().evaluate(*point); 
+                points.push(point);
 
-            // (p_i(X) - y_i) / (X - x_i)
-            let polynomial = 
-            &(labeled_polynomial.polynomial() - &Polynomial::from_coefficients_vec(vec![evaluated_y])) 
-            / 
-            &Polynomial::from_coefficients_vec(vec![
-                (G::ScalarField::zero() - &point), 
-                G::ScalarField::one()
-            ]);
-            
-            // h(X) = SUM( lambda^i * ((p_i(X) - y_i) / (X - x_i)) )
-            batch_polynomial += (cur_challenge, &polynomial);
+                // y_i
+                let evaluated_y = labeled_polynomial.polynomial().evaluate(*point); 
 
-            // lambda^i
-            cur_challenge = opening_challenges(opening_challenge_counter);
-            opening_challenge_counter += 1;
+                // (p_i(X) - y_i) / (X - x_i)
+                let polynomial = 
+                    &(labeled_polynomial.polynomial() - &Polynomial::from_coefficients_vec(vec![evaluated_y])) 
+                    / 
+                    &Polynomial::from_coefficients_vec(vec![
+                        (G::ScalarField::zero() - &point), 
+                        G::ScalarField::one()
+                    ]);
+                
+                // h(X) = SUM( lambda^i * ((p_i(X) - y_i) / (X - x_i)) )
+                batch_polynomial += (cur_challenge, &polynomial);
+
+                // lambda^i
+                cur_challenge = opening_challenges(opening_challenge_counter);
+                opening_challenge_counter += 1;
+            }
         }
 
         // Commitment of the h(X) polynomial
@@ -956,8 +966,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                         label: label.to_string(),
                     })?;
                 y_values.push(*y_i);
+                points.push(point);
             }
-            points.push(point);
         }
 
         // Commitment of the h(X) polynomial
@@ -988,8 +998,10 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             opening_challenge_counter += 1;
         }
 
+        // Reconstructed v value added to the check
         v_values.push(computed_batch_v);
 
+        // The commitment of h(X) polynomial added to the check
         let mut commitments = commitments.clone().into_iter().collect::<Vec<&'a LabeledCommitment<Self::Commitment>>>();
         let labeled_batch_commitment = LabeledCommitment::new(
             format!("Batch"),
