@@ -18,6 +18,7 @@ use rayon::prelude::*;
 use algebra_kernels::polycommit::{get_kernels, get_gpu_min_length};
 
 use digest::Digest;
+use rand_core::OsRng;
 
 /// A polynomial commitment scheme based on the hardness of the
 /// discrete logarithm problem in prime-order groups.
@@ -1097,33 +1098,40 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             Self::Commitment: 'a,
             Self::BatchProof: 'a,
     {
-        let mut xi_s_vec = Vec::new();
-        let mut final_comm_keys = Vec::new();
+        let comms = commitments.into_iter().collect::<Vec<_>>();
+        let query_sets = query_sets.into_iter().collect::<Vec<_>>();
+        let values = values.into_iter().collect::<Vec<_>>();
+        let proofs = proofs.into_iter().collect::<Vec<_>>();
+        let opening_challenges = opening_challenges.into_iter().collect::<Vec<_>>();
 
         let succinct_time = start_timer!(|| format!("Succinct verification of proofs"));
-        //TODO: Parallelize
-        for ((((commitments, query_set), values), proof), opening_challenge) in commitments.into_iter()
-            .zip(query_sets.into_iter())
-            .zip(values.into_iter())
-            .zip(proofs.into_iter())
-            .zip(opening_challenges.into_iter())
-        {
-            let opening_challenge_f = |pow| opening_challenge.pow(&[pow]);
-            let (xi_s, final_comm_key) = Self::succinct_batch_check_individual_opening_challenges(
-                vk,
-                commitments,
-                query_set,
-                values,
-                proof,
-                &opening_challenge_f,
-                rng
-            )?;
 
-            xi_s_vec.push(xi_s);
-            final_comm_keys.push(final_comm_key);
-        }
+        let xi_s_and_final_comm_keys = comms.into_par_iter()
+            .zip(query_sets)
+            .zip(values)
+            .zip(proofs)
+            .zip(opening_challenges)
+            .map(|((((commitments, query_set), values), proof), opening_challenge)|
+                {
+                    // Perform succinct check of i-th proof
+                    let opening_challenge_f = |pow| opening_challenge.pow(&[pow]);
+                    let (challenges, final_comm_key) = Self::succinct_batch_check_individual_opening_challenges(
+                        vk,
+                        commitments,
+                        query_set,
+                        values,
+                        proof,
+                        &opening_challenge_f,
+                        &mut OsRng::default() // the rng doesn't matter
+                    ).unwrap();
 
-        assert_eq!(xi_s_vec.len(), final_comm_keys.len());
+                    (challenges, final_comm_key)
+                }
+            ).collect::<Vec<_>>();
+
+        let xi_s_vec = xi_s_and_final_comm_keys.iter().map(|(chal, _)| chal.clone()).collect::<Vec<_>>();
+        let final_comm_keys = xi_s_and_final_comm_keys.iter().map(|(_, key)| key.clone()).collect::<Vec<_>>();
+
         end_timer!(succinct_time);
 
         let batching_time = start_timer!(|| "Combine check polynomials and final comm keys");
