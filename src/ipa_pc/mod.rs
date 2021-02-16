@@ -176,8 +176,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
         if !ProjectiveCurve::is_zero(&(round_commitment_proj - &check_commitment_elem)) {
             end_timer!(check_time);
-            return None;
-            //return Some(check_poly)
+            if cfg!(feature = "bench") { return Some(check_poly) } else { return None }
         }
 
         end_timer!(check_time);
@@ -1145,10 +1144,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             .into_par_iter()
             .zip(xi_s_vec)
             .map(|(chal, xi_s)| {
-                let mut temp = Polynomial::zero();
-                let check_poly = Polynomial::from_coefficients_vec(xi_s.compute_coeffs());
-                temp += (-chal, &check_poly);
-                temp
+                Polynomial::from_coefficients_vec(xi_s.compute_scaled_coeffs(-chal))
             }).reduce(|| Polynomial::zero(), |acc, scaled_poly| &acc + &scaled_poly);
         end_timer!(batching_time);
 

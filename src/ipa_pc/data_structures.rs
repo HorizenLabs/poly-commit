@@ -278,23 +278,33 @@ impl<G: AffineCurve> ToBytes for BatchProof<G> {
 pub struct SuccinctCheckPolynomial<F: Field>(pub Vec<F>);
 
 impl<F: Field> SuccinctCheckPolynomial<F> {
-    /// Computes the coefficients of the underlying degree `d` polynomial.
-    pub fn compute_coeffs(&self) -> Vec<F> {
+
+    fn _compute_succinct_poly_coeffs(&self, mut init_coeffs: Vec<F>) -> Vec<F> {
         let challenges = &self.0;
         let log_d = challenges.len();
 
-        let mut coeffs = vec![F::one(); 1 << log_d];
         for (i, challenge) in challenges.iter().enumerate() {
             let i = i + 1;
             let elem_degree = 1 << (log_d - i);
-            for start in (elem_degree..coeffs.len()).step_by(elem_degree * 2) {
+            for start in (elem_degree..init_coeffs.len()).step_by(elem_degree * 2) {
                 for offset in 0..elem_degree {
-                    coeffs[start + offset] *= challenge;
+                    init_coeffs[start + offset] *= challenge;
                 }
             }
         }
 
-        coeffs
+        init_coeffs
+    }
+
+    /// Computes the coefficients of the underlying degree `d` polynomial.
+    pub fn compute_coeffs(&self) -> Vec<F> {
+        self._compute_succinct_poly_coeffs(vec![F::one(); 1 << self.0.len()])
+    }
+
+    /// Computes the coefficients of the underlying degree `d` polynomial, scaled by
+    /// a factor `scale`.
+    pub fn compute_scaled_coeffs(&self, scale: F) -> Vec<F> {
+        self._compute_succinct_poly_coeffs(vec![scale; 1 << self.0.len()])
     }
 
     /// Evaluate `self` at `point` in time `O(log_d)`.

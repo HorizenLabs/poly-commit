@@ -43,12 +43,13 @@ blake2 = { version = "0.8", default-features = false }
 asm = [ "algebra/llvm_asm" ]
 print-trace = [ "bench-utils/print-trace" ]
 gpu = [ "algebra-kernels", "algebra-utils/gpu" ]
+bench = []
 
 [[bench]]
 name = "tweedle_batch_verify_batch_proofs"
 path = "benches/batch_proof_batch_verify.rs"
 harness = false
-required-features = ["asm", "algebra/parallel", "algebra/tweedle"]
+required-features = ["asm", "algebra/parallel", "algebra/tweedle", "bench"]
 
 [profile.release]
 opt-level = 3
