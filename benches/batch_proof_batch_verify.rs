@@ -216,7 +216,7 @@ fn bench_batch_verify_batch_proofs_tweedle_dee(c: &mut Criterion) {
 
     bench_batch_verify_batch_proofs::<TweedleDee, Blake2s>(
         c,
-        "batch verification of batch proofs in tweedle-dee, |H| = segment_size = 1 << 19",
+        "batch verification of batch proofs in tweedle-dee, |H| = segment_size = 1 << 19, number of proofs",
         1 << 19,
         42,
         vec![10, 50, 100],
@@ -224,7 +224,7 @@ fn bench_batch_verify_batch_proofs_tweedle_dee(c: &mut Criterion) {
 
     bench_batch_verify_batch_proofs::<TweedleDee, Blake2s>(
         c,
-        "batch verification of batch proofs in tweedle-dee, |H| = 1 << 19, segment_size = |H|/2",
+        "batch verification of batch proofs in tweedle-dee, |H| = 1 << 19, segment_size = |H|/2, number of proofs",
         1 << 18,
         84,
         vec![10, 50, 100],
@@ -234,7 +234,7 @@ fn bench_batch_verify_batch_proofs_tweedle_dee(c: &mut Criterion) {
 fn bench_batch_verify_batch_proofs_tweedle_dum(c: &mut Criterion) {
     bench_batch_verify_batch_proofs::<TweedleDum, Blake2s>(
         c,
-        "batch verification of batch proofs in tweedle-dum, |H| = segment_size = 1 << 19",
+        "batch verification of batch proofs in tweedle-dum, |H| = segment_size = 1 << 19, number of proofs",
         1 << 19,
         42,
         vec![10, 50, 100],
@@ -242,7 +242,7 @@ fn bench_batch_verify_batch_proofs_tweedle_dum(c: &mut Criterion) {
 
     bench_batch_verify_batch_proofs::<TweedleDum, Blake2s>(
         c,
-        "batch verification of batch proofs in tweedle-dum, |H| = 1 << 19, segment_size = |H|/2",
+        "batch verification of batch proofs in tweedle-dum, |H| = 1 << 19, segment_size = |H|/2, number of proofs",
         1 << 18,
         84,
         vec![10, 50, 100],

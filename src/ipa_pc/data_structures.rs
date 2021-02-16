@@ -279,20 +279,18 @@ pub struct SuccinctCheckPolynomial<F: Field>(pub Vec<F>);
 
 impl<F: Field> SuccinctCheckPolynomial<F> {
 
+    /// Slighlty optimized way to compute it, taken from
+    /// [o1-labs/marlin](https://github.com/o1-labs/marlin/blob/master/dlog/commitment/src/commitment.rs#L175)
     fn _compute_succinct_poly_coeffs(&self, mut init_coeffs: Vec<F>) -> Vec<F> {
         let challenges = &self.0;
         let log_d = challenges.len();
-
-        for (i, challenge) in challenges.iter().enumerate() {
-            let i = i + 1;
-            let elem_degree = 1 << (log_d - i);
-            for start in (elem_degree..init_coeffs.len()).step_by(elem_degree * 2) {
-                for offset in 0..elem_degree {
-                    init_coeffs[start + offset] *= challenge;
-                }
-            }
+        let mut k: usize = 0;
+        let mut pow: usize = 1;
+        for i in 1..1 << log_d {
+            k += if i == pow { 1 } else { 0 };
+            pow <<= if i == pow { 1 } else { 0 };
+            init_coeffs[i] = init_coeffs[i - (pow >> 1)] * challenges[log_d - 1 - (k - 1)];
         }
-
         init_coeffs
     }
 
