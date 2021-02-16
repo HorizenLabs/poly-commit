@@ -952,7 +952,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         // v_i values
         let mut v_values = batch_proof.batch_values.clone();
 
-        // y_i vallues
+        // y_i values
         let mut y_values = vec![];
 
         // x_i values
@@ -1001,7 +1001,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         // Reconstructed v value added to the check
         v_values.push(computed_batch_v);
 
-        // The commitment of h(X) polynomial added to the check
+        // The commitment to h(X) polynomial added to the check
         let mut commitments = commitments.clone().into_iter().collect::<Vec<&'a LabeledCommitment<Self::Commitment>>>();
         let labeled_batch_commitment = LabeledCommitment::new(
             format!("Batch"),
