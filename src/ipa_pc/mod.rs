@@ -778,9 +778,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         // h(X)
         let mut batch_polynomial = Polynomial::zero();
 
-        for (
-            _point_label, (point, labels), 
-        ) in query_to_labels_map.into_iter() {
+        for (_point_label, (point, labels)) in query_to_labels_map.into_iter() {
 
             for label in labels {
                 let labeled_polynomial =
@@ -859,12 +857,22 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         end_timer!(batch_time);
 
+        let opening_challenge = Self::compute_random_oracle_challenge(
+            &to_bytes![
+                batch_values,
+                batch_commitment,
+                point               
+            ]
+            .unwrap(),
+        );
+        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
+
         let proof = Self::open_individual_opening_challenges(
             ck,
             labeled_polynomials,
             commitments,
             point,
-            opening_challenges,
+            &opening_challenges,
             rands,
             rng
         )?;
@@ -990,7 +998,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let mut computed_batch_v = G::ScalarField::zero();
 
-        for ((v_i, y_i), x_i) in v_values.clone().into_iter().zip(y_values.clone()).zip(points.clone()) {
+        for ((v_i, y_i), x_i) in v_values.clone().into_iter().zip(y_values).zip(points) {
 
             computed_batch_v = computed_batch_v + &(cur_challenge * &((v_i - &y_i) / &(point - &x_i))); 
 
@@ -1014,13 +1022,23 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let proof = &batch_proof.proof;
 
+        let opening_challenge = Self::compute_random_oracle_challenge(
+            &to_bytes![
+                batch_proof.batch_values,
+                batch_commitment,
+                point               
+            ]
+            .unwrap(),
+        );
+        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
+
         Self::check_individual_opening_challenges(
             vk,
             commitments,
             point,
             v_values,
             proof,
-            opening_challenges,
+            &opening_challenges,
             Some(rng)
         )
     }
