@@ -255,7 +255,7 @@ pub struct BatchProof<G: AffineCurve> {
     pub batch_commitment: G, 
 
     /// Values: v_i = p_i(x), where x is fresh random challenge
-    pub batch_values: Vec<G::ScalarField>
+    pub batch_values: BTreeMap<String, G::ScalarField>
 }
 
 impl<G: AffineCurve> BatchPCProof for BatchProof<G> {
@@ -269,7 +269,7 @@ impl<G: AffineCurve> ToBytes for BatchProof<G> {
     fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
         self.proof.write(&mut writer)?;
         self.batch_commitment.write(&mut writer)?;
-        self.batch_values.write(&mut writer)
+        self.batch_values.values().collect::<Vec<&G::ScalarField>>().write(&mut writer)
     }
 }
 /// `SuccinctCheckPolynomial` is a succinctly-representated polynomial

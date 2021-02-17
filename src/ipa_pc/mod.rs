@@ -831,10 +831,10 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         );
 
         // Values: v_i = p_i(x), where x is fresh random challenge
-        let mut batch_values = vec![];
-        for labeled_polynomial in labeled_polynomials.iter() {
-            batch_values.push(labeled_polynomial.polynomial().evaluate(point));
-        }
+        let batch_values: BTreeMap<_, _> = labeled_polynomials
+            .iter()
+            .map(|labeled_polynomial| (labeled_polynomial.label().clone(), labeled_polynomial.polynomial().evaluate(point)))
+            .collect();
 
         // h(X) polynomial added to the set of polynomials for multi-poly single-point batching
         let mut labeled_polynomials = labeled_polynomials;
@@ -863,7 +863,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let opening_challenge = Self::compute_random_oracle_challenge(
             &to_bytes![
-                batch_values,
+                batch_values.values().collect::<Vec<&G::ScalarField>>(),
                 batch_commitment,
                 point               
             ]
@@ -964,7 +964,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         }
 
         // v_i values
-        let mut v_values = batch_proof.batch_values.clone();
+        let mut v_values = vec![];
 
         // y_i values
         let mut y_values = vec![];
@@ -979,6 +979,12 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                     .ok_or(Error::MissingEvaluation {
                         label: label.to_string(),
                     })?;
+                let v_i = batch_proof.batch_values
+                    .get(&label.clone())
+                    .ok_or(Error::MissingEvaluation {
+                        label: label.to_string(),
+                    })?;
+                v_values.push(*v_i);
                 y_values.push(*y_i);
                 points.push(point);
             }
@@ -986,7 +992,6 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         // Commitment of the h(X) polynomial
         let batch_commitment = batch_proof.batch_commitment;
-
 
         // TODO: When we will move to Sponge-based construction, we will absorb the batch_commitment only and then squeeze a new challenge
         // Fresh random challenge x
@@ -1006,7 +1011,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let mut computed_batch_v = G::ScalarField::zero();
 
-        for ((v_i, y_i), x_i) in v_values.clone().into_iter().zip(y_values).zip(points) {
+        for ((&v_i, y_i), x_i) in v_values.iter().zip(y_values).zip(points) {
 
             computed_batch_v = computed_batch_v + &(cur_challenge * &((v_i - &y_i) / &(point - x_i))); 
 
@@ -1032,7 +1037,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let opening_challenge = Self::compute_random_oracle_challenge(
             &to_bytes![
-                batch_proof.batch_values,
+                batch_proof.batch_values.values().collect::<Vec<&G::ScalarField>>(),
                 batch_commitment,
                 point               
             ]
