@@ -189,11 +189,11 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// of the polynomials at the points in the query set.
     fn batch_open<'a>(
         ck: &Self::CommitterKey,
-        labeled_polynomials: impl Clone + IntoIterator<Item = &'a LabeledPolynomial<F>>,
-        commitments: impl Clone + IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
+        labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
+        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         opening_challenge: F,
-        rands: impl Clone + IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a Self::Randomness>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<Self::BatchProof, Self::Error>
     where
@@ -242,7 +242,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// committed in `labeled_commitments`.
     fn batch_check<'a, R: RngCore>(
         vk: &Self::VerifierKey,
-        commitments: impl Clone + IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
+        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         evaluations: &Evaluations<F>,
         proof: &Self::BatchProof,
@@ -270,11 +270,11 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     fn open_combinations<'a>(
         ck: &Self::CommitterKey,
         linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
-        polynomials: impl Clone + IntoIterator<Item = &'a LabeledPolynomial<F>>,
-        commitments: impl Clone + IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
+        polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
+        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         opening_challenge: F,
-        rands: impl Clone + IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a Self::Randomness>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<BatchLCProof<F, Self>, Self::Error>
     where
@@ -299,7 +299,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     fn check_combinations<'a, R: RngCore>(
         vk: &Self::VerifierKey,
         linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
-        commitments: impl Clone + IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
+        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         eqn_query_set: &QuerySet<F>,
         eqn_evaluations: &Evaluations<F>,
         proof: &BatchLCProof<F, Self>,
@@ -339,11 +339,11 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// batch_open with individual challenges
     fn batch_open_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
-        labeled_polynomials: impl Clone + IntoIterator<Item = &'a LabeledPolynomial<F>>,
-        commitments: impl Clone + IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
+        labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
+        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         opening_challenges: &dyn Fn(u64) -> F,
-        rands: impl Clone + IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a Self::Randomness>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<Self::BatchProof, Self::Error>
     where
@@ -366,7 +366,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// batch_check but with individual challenges
     fn batch_check_individual_opening_challenges<'a, R: RngCore>(
         vk: &Self::VerifierKey,
-        commitments: impl Clone + IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
+        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         evaluations: &Evaluations<F>,
         proof: &Self::BatchProof,
@@ -380,11 +380,11 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     fn open_combinations_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
         linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
-        polynomials: impl Clone + IntoIterator<Item = &'a LabeledPolynomial<F>>,
-        commitments: impl Clone + IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
+        polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
+        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         opening_challenges: &dyn Fn(u64) -> F,
-        rands: impl Clone + IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a Self::Randomness>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<BatchLCProof<F, Self>, Self::Error>
     where
@@ -415,7 +415,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     fn check_combinations_individual_opening_challenges<'a, R: RngCore>(
         vk: &Self::VerifierKey,
         linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
-        commitments: impl Clone + IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
+        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         eqn_query_set: &QuerySet<F>,
         eqn_evaluations: &Evaluations<F>,
         proof: &BatchLCProof<F, Self>,
