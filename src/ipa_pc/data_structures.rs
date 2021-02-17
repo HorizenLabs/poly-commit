@@ -247,7 +247,8 @@ impl<G: AffineCurve> ToBytes for Proof<G> {
 )]
 pub struct BatchProof<G: AffineCurve> {
 
-    /// Muli-poly single-point proof
+    /// This is a "classical" single-point multi-poly proof which involves all commitments:
+    /// commitments from the initial claim and the new "batch_commitment"
     pub proof: Proof<G>,
 
     /// Commitment of the h(X) polynomial
