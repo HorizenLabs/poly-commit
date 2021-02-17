@@ -1129,8 +1129,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 }
             ).collect::<Vec<_>>();
 
-        let xi_s_vec = xi_s_and_final_comm_keys.iter().map(|(chal, _)| chal.clone()).collect::<Vec<_>>();
         let final_comm_keys = xi_s_and_final_comm_keys.iter().map(|(_, key)| key.clone()).collect::<Vec<_>>();
+        let xi_s_vec = xi_s_and_final_comm_keys.into_iter().map(|(chal, _)| chal).collect::<Vec<_>>();
 
         end_timer!(succinct_time);
 
@@ -1148,10 +1148,10 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         }
 
         // Compute the combined_check_poly
-        let combined_check_poly = batching_chal_pows.clone()
-            .into_par_iter()
+        let combined_check_poly = batching_chal_pows
+            .par_iter()
             .zip(xi_s_vec)
-            .map(|(chal, xi_s)| {
+            .map(|(&chal, xi_s)| {
                 Polynomial::from_coefficients_vec(xi_s.compute_scaled_coeffs(-chal))
             }).reduce(|| Polynomial::zero(), |acc, scaled_poly| &acc + &scaled_poly);
         end_timer!(batching_time);
