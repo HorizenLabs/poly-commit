@@ -51,6 +51,12 @@ path = "benches/batch_proof_batch_verify.rs"
 harness = false
 required-features = ["asm", "algebra/parallel", "algebra/tweedle", "bench"]
 
+[[bench]]
+name = "tweedle_batch_verify_batch_proofs_accumulator"
+path = "benches/batch_proof_batch_verify_accumulator.rs"
+harness = false
+required-features = ["asm", "algebra/parallel", "algebra/tweedle", "bench"]
+
 [profile.release]
 opt-level = 3
 lto = "thin"

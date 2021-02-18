@@ -1,7 +1,7 @@
-use algebra::{Field, AffineCurve, ProjectiveCurve, UniformRand};
+use algebra::{Field, AffineCurve, ProjectiveCurve, UniformRand, ToBytes, to_bytes};
 use rand::{thread_rng, RngCore, SeedableRng};
 use std::marker::PhantomData;
-use poly_commit::{PCVerifierKey, PolynomialCommitment, LabeledCommitment, Evaluations, QuerySet};
+use poly_commit::{PCVerifierKey, PolynomialCommitment, LabeledCommitment, Evaluations, QuerySet, PolynomialCommitmentBatchProofsAccumulator};
 use poly_commit::ipa_pc::{InnerProductArgPC, Commitment, Proof, VerifierKey, BatchProof};
 use digest::Digest;
 use criterion::*;
@@ -34,9 +34,9 @@ struct BenchVerifierData<'a, F: Field, PC: PolynomialCommitment<F>> {
 }
 
 impl<'a, D, G> BenchVerifierData<'a, G::ScalarField, InnerProductArgPC<G, D>>
-where
-    G: AffineCurve,
-    D: Digest,
+    where
+        G: AffineCurve,
+        D: Digest,
 {
     pub fn generate_vk<R: RngCore>(rng: &mut R, info: &BenchInfo) -> VerifierKey<G> {
         let BenchInfo {
@@ -58,7 +58,7 @@ where
             max_degree >= supported_degree,
             "max_degree < supported_degree"
         );
-        
+
         vk
     }
     /// Generate dummy TestVerifierData, according to the specs defined in info.
@@ -157,6 +157,7 @@ fn bench_batch_verify_batch_proofs<G: AffineCurve, D: Digest>(
         num_queries: 5
     };
     let vk = BenchVerifierData::<G::ScalarField, InnerProductArgPC<G, D>>::generate_vk(rng, &info);
+    let vk_hash = D::digest(&to_bytes!(vk).unwrap()).to_vec();
 
     for num_proofs in num_proofs_to_bench.into_iter() {
         group.bench_with_input(BenchmarkId::from_parameter(num_proofs), &num_proofs, |bn, num_proofs| {
@@ -182,18 +183,21 @@ fn bench_batch_verify_batch_proofs<G: AffineCurve, D: Digest>(
                         proofs.push(verifier_data.proof);
                         opening_challenges.push(verifier_data.opening_challenge.clone());
                     });
+                    let accumulator = proofs[0].proof.clone();
 
-                    (comms, query_sets, evals, proofs, opening_challenges)
+                    (comms, query_sets, evals, proofs, opening_challenges, accumulator)
                 },
-                |(comms, query_sets, evals, proofs, opening_challenges)| {
+                |(comms, query_sets, evals, proofs, opening_challenges, accumulator)| {
                     let rng = &mut thread_rng();
-                    InnerProductArgPC::<G, D>::batch_check_batch_proofs(
+                    InnerProductArgPC::<G, D>::batch_check_batch_proofs_with_accumulator(
                         &vk,
+                        vk_hash.clone(),
                         comms.iter().map(|comm| comm.as_slice()).collect::<Vec<_>>(),
                         query_sets.iter(),
                         evals.iter(),
                         proofs.iter(),
                         opening_challenges,
+                        accumulator,
                         rng
                     ).unwrap();
                 },
@@ -205,9 +209,9 @@ fn bench_batch_verify_batch_proofs<G: AffineCurve, D: Digest>(
 }
 
 use algebra::curves::tweedle::{
-        dee::Affine as TweedleDee,
-        dum::Affine as TweedleDum,
-    };
+    dee::Affine as TweedleDee,
+    dum::Affine as TweedleDum,
+};
 
 // the maximum degree we expect to handle is 2^19, maybe even below, e.g. 2^18
 // Segment size |H| => 42, segment size |H|/2 => 84
@@ -266,9 +270,9 @@ fn bench_batch_verify_batch_proofs_tweedle_dum(c: &mut Criterion) {
 }
 
 criterion_group!(
-name = tweedle_batch_verify_batch_proofs;
+name = tweedle_batch_verify_batch_proofs_accumulator;
 config = Criterion::default().sample_size(10);
 targets = bench_batch_verify_batch_proofs_tweedle_dee, bench_batch_verify_batch_proofs_tweedle_dum
 );
 
-criterion_main!(tweedle_batch_verify_batch_proofs);
+criterion_main!(tweedle_batch_verify_batch_proofs_accumulator);

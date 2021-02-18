@@ -519,6 +519,41 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     }
 }
 
+///TODO: ADD comment
+pub trait PolynomialCommitmentBatchProofsAccumulator<F: Field>: PolynomialCommitment<F> {
+
+    ///TODO: ADD comment
+    fn accumulate_batch_opening_proofs<'a, R: RngCore>(
+        vk: &Self::VerifierKey,
+        vk_hash: Vec<u8>,
+        commitments: Vec<&'a [LabeledCommitment<Self::Commitment>]>,
+        query_sets: Vec<&'a QuerySet<'a, F>>,
+        values: Vec<&'a Evaluations<'a, F>>,
+        proofs: Vec<&'a Self::BatchProof>,
+        opening_challenges: Vec<F>,
+        rng: &mut R,
+    ) -> Result<Self::Proof, Self::Error>
+        where
+            Self::Commitment: 'a,
+            Self::BatchProof: 'a;
+
+    ///TODO: ADD comment
+    fn batch_check_batch_proofs_with_accumulator<'a, R: RngCore>(
+        vk: &Self::VerifierKey,
+        vk_hash: Vec<u8>,
+        commitments: impl IntoIterator<Item = &'a [LabeledCommitment<Self::Commitment>]>,
+        query_sets: impl IntoIterator<Item = &'a QuerySet<'a, F>>,
+        values: impl IntoIterator<Item = &'a Evaluations<'a, F>>,
+        proofs: impl IntoIterator<Item = &'a Self::BatchProof>,
+        opening_challenges: impl IntoIterator<Item = F>,
+        accumulator: Self::Proof,
+        rng: &mut R,
+    ) -> Result<bool, Self::Error>
+        where
+            Self::Commitment: 'a,
+            Self::BatchProof: 'a;
+}
+
 /// Evaluate the given polynomials at `query_set`.
 pub fn evaluate_query_set<'a, F: Field>(
     polys: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
@@ -558,9 +593,10 @@ fn lc_query_set_to_poly_query_set<'a, F: 'a + Field>(
 #[cfg(test)]
 pub mod tests {
     use crate::*;
-    use algebra::Field;
+    use algebra::{Field, ToBytes, to_bytes};
     use rand::{distributions::Distribution, Rng, thread_rng};
     use std::marker::PhantomData;
+    use digest::Digest;
 
     #[derive(Copy, Clone, Default)]
     struct TestInfo {
@@ -1162,7 +1198,7 @@ pub mod tests {
         test_template::<F, PC>(info)
     }
 
-    pub fn batch_check_batch_proof_test<F, PC>() -> Result<(), PC::Error>
+    pub fn batch_check_batch_proofs_test<F, PC>() -> Result<(), PC::Error>
         where
             F: Field,
             PC: PolynomialCommitment<F>,
@@ -1211,6 +1247,76 @@ pub mod tests {
                 proofs,
                 opening_challenges,
                 rng
+            )?)
+        }
+
+        Ok(())
+    }
+
+    pub fn batch_check_batch_proofs_with_accumulator_test<F, PC, D>() -> Result<(), PC::Error>
+        where
+            F: Field,
+            PC: PolynomialCommitmentBatchProofsAccumulator<F>,
+            D: Digest,
+    {
+        let rng = &mut thread_rng();
+        let max_degree = rand::distributions::Uniform::from(2..=64).sample(rng);
+
+        let info = TestInfo {
+            num_iters: 1,
+            max_degree: Some(max_degree),
+            supported_degree: None,
+            num_polynomials: 10,
+            enforce_degree_bounds: true,
+            max_num_queries: 1, // Simulate having a multi poly multi point proof
+            ..Default::default()
+        };
+
+        let pp = PC::setup(max_degree, rng)?;
+
+        for num_proofs in 1..10 {
+            // Generate all proofs and the data needed by the verifier to verify them
+            let verifier_data_vec = vec![get_data_for_verifier::<F, PC>(info, Some(pp.clone())).unwrap(); num_proofs];
+
+            let vk = &verifier_data_vec[0].vk;
+            let vk_hash = D::digest(&to_bytes!(vk).unwrap()).to_vec();
+
+            let mut comms = Vec::new();
+            let mut query_sets = Vec::new();
+            let mut evals = Vec::new();
+            let mut proofs = Vec::new();
+            let mut opening_challenges = Vec::new();
+
+            verifier_data_vec.iter().for_each(|verifier_data| {
+                assert_eq!(&verifier_data.vk, vk); // Vk should be equal for all proofs
+                comms.push(verifier_data.comms.as_slice());
+                query_sets.push(&verifier_data.query_set);
+                evals.push(&verifier_data.values);
+                proofs.push(&verifier_data.proof);
+                opening_challenges.push(verifier_data.opening_challenge.clone());
+            });
+
+            let accumulator = PC::accumulate_batch_opening_proofs(
+                vk,
+                vk_hash.clone(),
+                comms.clone(),
+                query_sets.clone(),
+                evals.clone(),
+                proofs.clone(),
+                opening_challenges.clone(),
+                rng
+            )?;
+
+            assert!(PC::batch_check_batch_proofs_with_accumulator(
+                vk,
+                vk_hash,
+                comms,
+                query_sets,
+                evals,
+                proofs,
+                opening_challenges,
+                accumulator,
+                rng,
             )?)
         }
 

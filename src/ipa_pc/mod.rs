@@ -1,4 +1,4 @@
-use crate::{BTreeMap, BTreeSet, String, ToString, Vec};
+use crate::{BTreeMap, BTreeSet, String, ToString, Vec, PolynomialCommitmentBatchProofsAccumulator};
 use crate::{BatchLCProof, Error, Evaluations, QuerySet};
 use crate::{LabeledCommitment, LabeledPolynomial, LinearCombination};
 use crate::{PCCommitterKey, PCRandomness, PCUniversalParams, Polynomial, PolynomialCommitment};
@@ -1028,14 +1028,21 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             return Ok(false);
         }
 
+        let check_poly_time = start_timer!(|| "Compute check poly");
         let check_poly_coeffs = check_poly.unwrap().compute_coeffs();
+        end_timer!(check_poly_time);
+
+        let hard_time = start_timer!(|| "DLOG hard part");
         let final_key = Self::cm_commit(
             vk.comm_key.as_slice(),
             check_poly_coeffs.as_slice(),
             None,
             None,
         );
+        end_timer!(hard_time);
+
         if !ProjectiveCurve::is_zero(&(final_key - &proof.final_comm_key.into_projective())) {
+            end_timer!(check_time);
             return Ok(false);
         }
 
@@ -1371,6 +1378,218 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
     }
 }
 
+impl<G: AffineCurve, D: Digest> PolynomialCommitmentBatchProofsAccumulator<G::ScalarField> for InnerProductArgPC<G, D> {
+    fn accumulate_batch_opening_proofs<'a, R: RngCore>(
+        vk:                 &Self::VerifierKey,
+        vk_hash:            Vec<u8>,
+        commitments:        Vec<&'a [LabeledCommitment<Self::Commitment>]>,
+        query_sets:         Vec<&'a QuerySet<'a, G::ScalarField>>,
+        values:             Vec<&'a Evaluations<'a, G::ScalarField>>,
+        proofs:             Vec<&'a Self::BatchProof>,
+        opening_challenges: Vec<G::ScalarField>,
+        rng:                &mut R,
+    ) -> Result<Self::Proof, Self::Error>
+        where
+            Self::Commitment: 'a,
+            Self::BatchProof: 'a
+    {
+        // Perform succinct verification of all the proofs and collect
+        // the xi_s and the GFinal_s
+        let succinct_time = start_timer!(|| "Succinct verification of proofs");
+
+        let xi_s_and_final_comm_keys = commitments.into_par_iter()
+            .zip(query_sets)
+            .zip(values)
+            .zip(proofs)
+            .zip(opening_challenges)
+            .map(|((((commitments, query_set), values), proof), opening_challenge)|
+                {
+                    // Perform succinct check of i-th proof
+                    let opening_challenge_f = |pow| opening_challenge.pow(&[pow]);
+                    let (challenges, final_comm_key) = Self::succinct_batch_check_individual_opening_challenges(
+                        vk,
+                        commitments,
+                        query_set,
+                        values,
+                        proof,
+                        &opening_challenge_f,
+                        &mut OsRng::default() // the rng doesn't matter
+                    ).unwrap();
+
+                    (challenges, final_comm_key)
+                }
+            ).collect::<Vec<_>>();
+
+        let final_comm_keys = xi_s_and_final_comm_keys
+            .iter()
+            .enumerate()
+            .map(|(i, (_, key))| {
+                let comm = Commitment {
+                    comm: key.clone(),
+                    shifted_comm: None
+                };
+                LabeledCommitment::new(
+                    format!("check_poly_{}", i),
+                    comm,
+                    None,
+                )
+            }).collect::<Vec<_>>();
+
+        let comms_len = final_comm_keys.len();
+
+        let xi_s_vec = xi_s_and_final_comm_keys.into_iter().map(|(chal, _)| chal).collect::<Vec<_>>();
+
+        end_timer!(succinct_time);
+
+        let check_polys_time = start_timer!(|| "Compute check polynomials and their evaluations");
+
+        // Sample a new challenge z
+        let z = Self::compute_random_oracle_challenge(
+            &to_bytes![vk_hash, final_comm_keys.clone(), xi_s_vec.clone()].unwrap(),
+        );
+
+        // Compute the evaluations of all the bullet polynomials at z
+        let values = xi_s_vec
+            .par_iter()
+            .flat_map(|xi_s| { to_bytes!(xi_s.evaluate(z)).unwrap() })
+            .collect::<Vec<u8>>();
+
+        // Compute all the bullet polynomials
+        let check_polys = xi_s_vec
+            .into_par_iter()
+            .map(|xi_s| {
+                Polynomial::from_coefficients_vec(xi_s.compute_coeffs())
+            }).collect::<Vec<_>>();
+
+        // Construct labeled polynomials out of the check_polys
+        let labeled_check_polys = check_polys
+            .into_iter()
+            .enumerate()
+            .map(|(i, check_poly)|{
+                LabeledPolynomial::new(
+                    format!("check_poly_{}", i),
+                    check_poly,
+                    None,
+                    None
+                )
+            }).collect::<Vec<_>>();
+
+        end_timer!(check_polys_time);
+
+        // Sample new opening challenge
+        let opening_challenge = Self::compute_random_oracle_challenge(&values);
+        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
+
+        // Compute and return opening proof
+        Self::open_individual_opening_challenges(
+            vk,
+            labeled_check_polys.iter(),
+            final_comm_keys.iter(),
+            z,
+            &opening_challenges,
+            vec![Randomness::<G>::empty(); comms_len].iter(),
+            Some(rng)
+        )
+    }
+
+    /// Batch verification of multiple Self::BatchProof(s)
+    fn batch_check_batch_proofs_with_accumulator<'a, R: RngCore>(
+        vk:                 &Self::VerifierKey,
+        vk_hash:            Vec<u8>,
+        commitments:        impl IntoIterator<Item = &'a [LabeledCommitment<Self::Commitment>]>,
+        query_sets:         impl IntoIterator<Item = &'a QuerySet<'a, G::ScalarField>>,
+        values:             impl IntoIterator<Item = &'a Evaluations<'a, G::ScalarField>>,
+        proofs:             impl IntoIterator<Item = &'a Self::BatchProof>,
+        opening_challenges: impl IntoIterator<Item = G::ScalarField>,
+        accumulator:   Self::Proof,
+        rng:                &mut R,
+    ) -> Result<bool, Self::Error>
+        where
+            Self::Commitment: 'a,
+            Self::BatchProof: 'a,
+    {
+        let comms = commitments.into_iter().collect::<Vec<_>>();
+        let query_sets = query_sets.into_iter().collect::<Vec<_>>();
+        let values = values.into_iter().collect::<Vec<_>>();
+        let proofs = proofs.into_iter().collect::<Vec<_>>();
+        let opening_challenges = opening_challenges.into_iter().collect::<Vec<_>>();
+
+        let succinct_time = start_timer!(|| format!("Succinct verification of proofs"));
+
+        let xi_s_and_final_comm_keys = comms.into_par_iter()
+            .zip(query_sets)
+            .zip(values)
+            .zip(proofs)
+            .zip(opening_challenges)
+            .map(|((((commitments, query_set), values), proof), opening_challenge)|
+                {
+                    // Perform succinct check of i-th proof
+                    let opening_challenge_f = |pow| opening_challenge.pow(&[pow]);
+                    let (challenges, final_comm_key) = Self::succinct_batch_check_individual_opening_challenges(
+                        vk,
+                        commitments,
+                        query_set,
+                        values,
+                        proof,
+                        &opening_challenge_f,
+                        &mut OsRng::default() // the rng doesn't matter
+                    ).unwrap();
+
+                    (challenges, final_comm_key)
+                }
+            ).collect::<Vec<_>>();
+
+        let final_comm_keys = xi_s_and_final_comm_keys
+            .iter()
+            .enumerate()
+            .map(|(i, (_, key))| {
+                let comm = Commitment {
+                    comm: key.clone(),
+                    shifted_comm: None
+                };
+                LabeledCommitment::new(
+                    format!("check_poly_{}", i),
+                    comm,
+                    None,
+                )
+            }).collect::<Vec<_>>();
+
+        let xi_s_vec = xi_s_and_final_comm_keys.into_iter().map(|(chal, _)| chal).collect::<Vec<_>>();
+
+        end_timer!(succinct_time);
+
+        let batching_time = start_timer!(|| "Compute bullet polys evaluations");
+
+        // Sample a new challenge z
+        let z = Self::compute_random_oracle_challenge(
+            &to_bytes![vk_hash, final_comm_keys.clone(), xi_s_vec.clone()].unwrap(),
+        );
+
+        // Compute the evaluations of all the bullet polynomials at z
+        let values = xi_s_vec
+            .par_iter()
+            .map(|xi_s| { xi_s.evaluate(z) })
+            .collect::<Vec<_>>();
+
+        end_timer!(batching_time);
+
+        // Sample new opening challenge
+        let opening_challenge = Self::compute_random_oracle_challenge(&to_bytes![values].unwrap());
+        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
+
+        // Check dlog_accumulator
+        Self::check_individual_opening_challenges(
+            vk,
+            final_comm_keys.iter(),
+            z,
+            values,
+            &accumulator,
+            &opening_challenges,
+            Some(rng)
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(non_camel_case_types)]
@@ -1440,9 +1659,16 @@ mod tests {
     }
 
     #[test]
-    fn batch_check_batch_proof_test() {
+    fn batch_check_batch_proofs_test() {
         use crate::tests::*;
-        batch_check_batch_proof_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
+        batch_check_batch_proofs_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
+        println!("Finished tweedle_dee-blake2s");
+    }
+
+    #[test]
+    fn batch_check_batch_proofs_with_accumulator_test() {
+        use crate::tests::*;
+        batch_check_batch_proofs_with_accumulator_test::<_, PC_DEE, Blake2s>().expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
 

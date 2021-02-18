@@ -60,6 +60,15 @@ impl<G: AffineCurve> PCCommitterKey for CommitterKey<G> {
     }
 }
 
+impl<G: AffineCurve> ToBytes for CommitterKey<G> {
+    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
+        self.comm_key.write(&mut writer)?;
+        self.h.write(&mut writer)?;
+        self.s.write(&mut writer)?;
+        (self.max_degree as u8).write(&mut writer)
+    }
+}
+
 /// `VerifierKey` is used to check evaluation proofs for a given commitment.
 pub type VerifierKey<G> = CommitterKey<G>;
 
@@ -275,6 +284,7 @@ impl<G: AffineCurve> ToBytes for BatchProof<G> {
 /// `SuccinctCheckPolynomial` is a succinctly-representated polynomial
 /// generated from the `log_d` random oracle challenges generated in `open`.
 /// It has the special property that can be evaluated in `O(log_d)` time.
+#[derive(Clone)]
 pub struct SuccinctCheckPolynomial<F: Field>(pub Vec<F>);
 
 impl<F: Field> SuccinctCheckPolynomial<F> {
@@ -319,5 +329,12 @@ impl<F: Field> SuccinctCheckPolynomial<F> {
         }
 
         product
+    }
+}
+
+impl<F: Field> ToBytes for SuccinctCheckPolynomial<F> {
+    #[inline]
+    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
+        self.0.write(&mut writer)
     }
 }
