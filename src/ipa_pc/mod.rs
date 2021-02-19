@@ -742,6 +742,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<G::ScalarField>,
+        // TODO: In order to implement the Fiat-Shamir transform in a "clean" manner, we need to pass a sponge instead of opening_challenges(). This sponge is then used to squeeze the opening challenge(s) as well as the fresh query point x
         opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rands: impl IntoIterator<Item = &'a Self::Randomness>,
         rng: Option<&mut dyn RngCore>,
@@ -945,6 +946,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         query_set: &QuerySet<G::ScalarField>,
         evaluations: &Evaluations<G::ScalarField>,
         batch_proof: &Self::BatchProof,
+        // TODO: In order to implement the Fiat-Shamir transform in a "clean" manner, we need to pass a sponge instead of opening_challenges(). This sponge is then used to squeeze the opening challenge(s) as well as the fresh query point x
         opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rng: &mut R,
     ) -> Result<bool, Self::Error>
