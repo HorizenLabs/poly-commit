@@ -281,6 +281,31 @@ impl<G: AffineCurve> ToBytes for BatchProof<G> {
         self.batch_values.write(&mut writer)
     }
 }
+
+/// This implements the public aggregator for the IPA/DLOG commitment scheme.
+#[derive(Clone)]
+pub struct DLogAccumulator<G: AffineCurve> {
+    /// Final committer key after the DLOG reduction.
+    pub(crate) g_final:    Commitment<G>,
+
+    /// Challenges of the DLOG reduction.
+    pub(crate) xi_s:       SuccinctCheckPolynomial<G::ScalarField>
+}
+
+impl<G: AffineCurve> PCAccumulator for DLogAccumulator<G>
+{
+    type Commitment = Commitment<G>;
+    type SuccinctDescription = SuccinctCheckPolynomial<G::ScalarField>;
+}
+
+impl<G: AffineCurve> ToBytes for DLogAccumulator<G> {
+    #[inline]
+    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
+        self.g_final.write(&mut writer)?;
+        self.xi_s.write(&mut writer)
+    }
+}
+
 /// `SuccinctCheckPolynomial` is a succinctly-representated polynomial
 /// generated from the `log_d` random oracle challenges generated in `open`.
 /// It has the special property that can be evaluated in `O(log_d)` time.

@@ -219,7 +219,7 @@ fn bench_batch_verify_batch_proofs_tweedle_dee(c: &mut Criterion) {
         "tweedle-dee, |H| = segment_size = 1 << 19, proofs",
         1 << 19,
         42,
-        vec![1, 10, 50, 100],
+        vec![10, 50, 100],
     );
 
     bench_batch_verify_batch_proofs::<TweedleDee, Blake2s>(
@@ -227,7 +227,7 @@ fn bench_batch_verify_batch_proofs_tweedle_dee(c: &mut Criterion) {
         "tweedle-dee, |H| = 1 << 19, segment_size = |H|/2, proofs",
         1 << 18,
         84,
-        vec![1, 10, 50, 100],
+        vec![10, 50, 100],
     );
 
     bench_batch_verify_batch_proofs::<TweedleDee, Blake2s>(
@@ -235,7 +235,7 @@ fn bench_batch_verify_batch_proofs_tweedle_dee(c: &mut Criterion) {
         "tweedle-dee, |H| = 1 << 19, segment_size = |H|/4, proofs",
         1 << 17,
         168,
-        vec![1, 10, 50, 100],
+        vec![10, 50, 100],
     );
 }
 
@@ -245,7 +245,7 @@ fn bench_batch_verify_batch_proofs_tweedle_dum(c: &mut Criterion) {
         "tweedle-dum, |H| = segment_size = 1 << 19, proofs",
         1 << 19,
         42,
-        vec![1, 10, 50, 100],
+        vec![10, 50, 100],
     );
 
     bench_batch_verify_batch_proofs::<TweedleDum, Blake2s>(
@@ -253,7 +253,7 @@ fn bench_batch_verify_batch_proofs_tweedle_dum(c: &mut Criterion) {
         "tweedle-dum, |H| = 1 << 19, segment_size = |H|/2, proofs",
         1 << 18,
         84,
-        vec![1, 10, 50, 100],
+        vec![10, 50, 100],
     );
 
     bench_batch_verify_batch_proofs::<TweedleDum, Blake2s>(
@@ -261,13 +261,13 @@ fn bench_batch_verify_batch_proofs_tweedle_dum(c: &mut Criterion) {
         "tweedle-dum, |H| = 1 << 19, segment_size = |H|/4, proofs",
         1 << 17,
         168,
-        vec![1, 10, 50, 100],
+        vec![10, 50, 100],
     );
 }
 
 criterion_group!(
 name = tweedle_batch_verify_batch_proofs;
-config = Criterion::default().sample_size(10);
+config = Criterion::default().sample_size(50);
 targets = bench_batch_verify_batch_proofs_tweedle_dee, bench_batch_verify_batch_proofs_tweedle_dum
 );
 

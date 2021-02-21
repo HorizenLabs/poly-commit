@@ -519,39 +519,42 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     }
 }
 
-///TODO: ADD comment
-pub trait PolynomialCommitmentBatchProofsAccumulator<F: Field>: PolynomialCommitment<F> {
+/// Generic interface of a public aggregation scheme as defined in ...
+/// TODO: Add literature
+pub trait PublicAccumulationScheme<F: Field, A: PCAccumulator>: PolynomialCommitment<F> {
 
-    ///TODO: ADD comment
-    fn accumulate_batch_opening_proofs<'a, R: RngCore>(
+    /// Succinct verify proofs and, if valid, return their accumulators.
+    fn succinct_verify<'a, R: RngCore>(
         vk: &Self::VerifierKey,
-        vk_hash: Vec<u8>,
-        commitments: Vec<&'a [LabeledCommitment<Self::Commitment>]>,
-        query_sets: Vec<&'a QuerySet<'a, F>>,
-        values: Vec<&'a Evaluations<'a, F>>,
-        proofs: Vec<&'a Self::BatchProof>,
-        opening_challenges: Vec<F>,
-        rng: &mut R,
-    ) -> Result<Self::Proof, Self::Error>
-        where
-            Self::Commitment: 'a,
-            Self::BatchProof: 'a;
-
-    ///TODO: ADD comment
-    fn batch_check_batch_proofs_with_accumulator<'a, R: RngCore>(
-        vk: &Self::VerifierKey,
-        vk_hash: Vec<u8>,
         commitments: impl IntoIterator<Item = &'a [LabeledCommitment<Self::Commitment>]>,
         query_sets: impl IntoIterator<Item = &'a QuerySet<'a, F>>,
         values: impl IntoIterator<Item = &'a Evaluations<'a, F>>,
         proofs: impl IntoIterator<Item = &'a Self::BatchProof>,
         opening_challenges: impl IntoIterator<Item = F>,
-        accumulator: Self::Proof,
         rng: &mut R,
-    ) -> Result<bool, Self::Error>
+    ) -> Result<Vec<A>, Self::Error>
         where
             Self::Commitment: 'a,
             Self::BatchProof: 'a;
+
+    /// Amortization strategy for A as a separate protocol.
+    /// Return a separate non-interactive proof.
+    fn accumulate<'a, R: RngCore>(
+        vk: &Self::VerifierKey,
+        vk_hash: Vec<u8>,
+        accumulators: Vec<A>,
+        rng: &mut R,
+    ) -> Result<Self::Proof, Self::Error>;
+
+    /// Verifies a proof produced by accumulators.
+    /// This includes also the non-succinct check to be done.
+    fn verify_accumulation<R: RngCore>(
+        vk: &Self::VerifierKey,
+        vk_hash: Vec<u8>,
+        accumulators: Vec<A>,
+        proof: Self::Proof,
+        rng: &mut R,
+    ) -> Result<bool, Self::Error>;
 }
 
 /// Evaluate the given polynomials at `query_set`.
@@ -1212,7 +1215,7 @@ pub mod tests {
             supported_degree: None,
             num_polynomials: 10,
             enforce_degree_bounds: true,
-            max_num_queries: 1, // Simulate having a multi poly multi point proof
+            max_num_queries: 5,
             ..Default::default()
         };
 
@@ -1253,10 +1256,11 @@ pub mod tests {
         Ok(())
     }
 
-    pub fn batch_check_batch_proofs_with_accumulator_test<F, PC, D>() -> Result<(), PC::Error>
+    pub fn accumulation_test<F, A, PC, D>() -> Result<(), PC::Error>
         where
             F: Field,
-            PC: PolynomialCommitmentBatchProofsAccumulator<F>,
+            A: PCAccumulator,
+            PC: PublicAccumulationScheme<F, A>,
             D: Digest,
     {
         let rng = &mut thread_rng();
@@ -1268,7 +1272,7 @@ pub mod tests {
             supported_degree: None,
             num_polynomials: 10,
             enforce_degree_bounds: true,
-            max_num_queries: 1, // Simulate having a multi poly multi point proof
+            max_num_queries: 5,
             ..Default::default()
         };
 
@@ -1296,9 +1300,9 @@ pub mod tests {
                 opening_challenges.push(verifier_data.opening_challenge.clone());
             });
 
-            let accumulator = PC::accumulate_batch_opening_proofs(
+            // Prover side
+            let accumulators = PC::succinct_verify(
                 vk,
-                vk_hash.clone(),
                 comms.clone(),
                 query_sets.clone(),
                 evals.clone(),
@@ -1307,17 +1311,34 @@ pub mod tests {
                 rng
             )?;
 
-            assert!(PC::batch_check_batch_proofs_with_accumulator(
+            let proof = PC::accumulate(
                 vk,
-                vk_hash,
-                comms,
-                query_sets,
-                evals,
-                proofs,
-                opening_challenges,
-                accumulator,
-                rng,
-            )?)
+                vk_hash.clone(),
+                accumulators,
+                rng
+            )?;
+
+            // Verifier side
+            let accumulators = PC::succinct_verify(
+                vk,
+                comms.clone(),
+                query_sets.clone(),
+                evals.clone(),
+                proofs.clone(),
+                opening_challenges.clone(),
+                rng
+            )?;
+
+            assert!(
+                PC::verify_accumulation(
+                    vk,
+                    vk_hash,
+                    accumulators,
+                    proof,
+                    rng
+                )?
+            );
+
         }
 
         Ok(())

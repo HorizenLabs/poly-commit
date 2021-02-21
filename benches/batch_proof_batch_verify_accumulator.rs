@@ -1,7 +1,7 @@
 use algebra::{Field, AffineCurve, ProjectiveCurve, UniformRand, ToBytes, to_bytes};
 use rand::{thread_rng, RngCore, SeedableRng};
 use std::marker::PhantomData;
-use poly_commit::{PCVerifierKey, PolynomialCommitment, LabeledCommitment, Evaluations, QuerySet, PolynomialCommitmentBatchProofsAccumulator};
+use poly_commit::{PCVerifierKey, PolynomialCommitment, LabeledCommitment, Evaluations, QuerySet, PublicAccumulationScheme};
 use poly_commit::ipa_pc::{InnerProductArgPC, Commitment, Proof, VerifierKey, BatchProof};
 use digest::Digest;
 use criterion::*;
@@ -183,21 +183,29 @@ fn bench_batch_verify_batch_proofs<G: AffineCurve, D: Digest>(
                         proofs.push(verifier_data.proof);
                         opening_challenges.push(verifier_data.opening_challenge.clone());
                     });
-                    let accumulator = proofs[0].proof.clone();
+                    let accumulation_proof = proofs[0].proof.clone();
 
-                    (comms, query_sets, evals, proofs, opening_challenges, accumulator)
+                    (comms, query_sets, evals, proofs, opening_challenges, accumulation_proof)
                 },
-                |(comms, query_sets, evals, proofs, opening_challenges, accumulator)| {
+                |(comms, query_sets, evals, proofs, opening_challenges, accumulation_proof)| {
                     let rng = &mut thread_rng();
-                    InnerProductArgPC::<G, D>::batch_check_batch_proofs_with_accumulator(
+
+                    let accumulators = InnerProductArgPC::<G, D>::succinct_verify(
                         &vk,
-                        vk_hash.clone(),
                         comms.iter().map(|comm| comm.as_slice()).collect::<Vec<_>>(),
                         query_sets.iter(),
                         evals.iter(),
                         proofs.iter(),
                         opening_challenges,
-                        accumulator,
+                        rng
+                    ).unwrap();
+
+
+                    InnerProductArgPC::<G, D>::verify_accumulation(
+                        &vk,
+                        vk_hash.clone(),
+                        accumulators,
+                        accumulation_proof,
                         rng
                     ).unwrap();
                 },
@@ -223,7 +231,7 @@ fn bench_batch_verify_batch_proofs_tweedle_dee(c: &mut Criterion) {
         "tweedle-dee, |H| = segment_size = 1 << 19, proofs",
         1 << 19,
         42,
-        vec![1, 10, 50, 100],
+        vec![10, 50, 100],
     );
 
     bench_batch_verify_batch_proofs::<TweedleDee, Blake2s>(
@@ -231,7 +239,7 @@ fn bench_batch_verify_batch_proofs_tweedle_dee(c: &mut Criterion) {
         "tweedle-dee, |H| = 1 << 19, segment_size = |H|/2, proofs",
         1 << 18,
         84,
-        vec![1, 10, 50, 100],
+        vec![10, 50, 100],
     );
 
     bench_batch_verify_batch_proofs::<TweedleDee, Blake2s>(
@@ -239,7 +247,7 @@ fn bench_batch_verify_batch_proofs_tweedle_dee(c: &mut Criterion) {
         "tweedle-dee, |H| = 1 << 19, segment_size = |H|/4, proofs",
         1 << 17,
         168,
-        vec![1, 10, 50, 100],
+        vec![10, 50, 100],
     );
 }
 
@@ -249,7 +257,7 @@ fn bench_batch_verify_batch_proofs_tweedle_dum(c: &mut Criterion) {
         "tweedle-dum, |H| = segment_size = 1 << 19, proofs",
         1 << 19,
         42,
-        vec![1, 10, 50, 100],
+        vec![10, 50, 100],
     );
 
     bench_batch_verify_batch_proofs::<TweedleDum, Blake2s>(
@@ -257,7 +265,7 @@ fn bench_batch_verify_batch_proofs_tweedle_dum(c: &mut Criterion) {
         "tweedle-dum, |H| = 1 << 19, segment_size = |H|/2, proofs",
         1 << 18,
         84,
-        vec![1, 10, 50, 100],
+        vec![10, 50, 100],
     );
 
     bench_batch_verify_batch_proofs::<TweedleDum, Blake2s>(
@@ -265,13 +273,13 @@ fn bench_batch_verify_batch_proofs_tweedle_dum(c: &mut Criterion) {
         "tweedle-dum, |H| = 1 << 19, segment_size = |H|/4, proofs",
         1 << 17,
         168,
-        vec![1, 10, 50, 100],
+        vec![10, 50, 100],
     );
 }
 
 criterion_group!(
 name = tweedle_batch_verify_batch_proofs_accumulator;
-config = Criterion::default().sample_size(10);
+config = Criterion::default().sample_size(50);
 targets = bench_batch_verify_batch_proofs_tweedle_dee, bench_batch_verify_batch_proofs_tweedle_dum
 );
 
