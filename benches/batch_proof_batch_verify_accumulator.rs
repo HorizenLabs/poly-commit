@@ -1,6 +1,9 @@
 use algebra::{Field, AffineCurve, ProjectiveCurve, UniformRand, ToBytes, to_bytes};
 use rand::{thread_rng, RngCore, SeedableRng};
-use std::marker::PhantomData;
+use std::{
+    collections::BTreeMap,
+    marker::PhantomData
+};
 use poly_commit::{PCVerifierKey, PolynomialCommitment, LabeledCommitment, Evaluations, QuerySet, PublicAccumulationScheme};
 use poly_commit::ipa_pc::{InnerProductArgPC, Commitment, Proof, VerifierKey, BatchProof};
 use digest::Digest;
@@ -120,10 +123,14 @@ impl<'a, D, G> BenchVerifierData<'a, G::ScalarField, InnerProductArgPC<G, D>>
             hiding_comm: if hiding_bound { Some(G::Projective::rand(rng).into_affine()) } else { None },
             rand: if hiding_bound { Some(G::ScalarField::rand(rng)) } else { None },
         };
+        let batch_values: BTreeMap<_, _> = labeled_comms
+            .iter()
+            .map(|labeled_comm| (labeled_comm.label().clone(), G::ScalarField::rand(rng)))
+            .collect();
         let batch_proof = BatchProof::<G> {
             proof,
             batch_commitment: G::Projective::rand(rng).into_affine(),
-            batch_values: vec![G::ScalarField::rand(rng); num_commitments],
+            batch_values,
         };
 
         Self {

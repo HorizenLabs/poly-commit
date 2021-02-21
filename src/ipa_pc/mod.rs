@@ -188,7 +188,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     /// and the GFinal.
     fn succinct_batch_check_individual_opening_challenges<'a, R: RngCore>(
         vk: &VerifierKey<G>,
-        commitments: impl Clone + IntoIterator<Item = &'a LabeledCommitment<Commitment<G>>>,
+        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Commitment<G>>>,
         query_set: &QuerySet<G::ScalarField>,
         values: &Evaluations<G::ScalarField>,
         batch_proof: &BatchProof<G>,
@@ -196,7 +196,10 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         _rng: &mut R,
     ) -> Result<(SuccinctCheckPolynomial<G::ScalarField>, G), Error>
     {
+        let commitments: Vec<&'a LabeledCommitment<Commitment<G>>> = commitments.into_iter().map(|comm| comm).collect();
+
         let batch_check_time = start_timer!(|| "Multi poly multi point batch check: succinct part");
+        let evals_time = start_timer!(|| "Compute batched poly value");
 
         let mut query_to_labels_map = BTreeMap::new();
         for (label, (point_label, point)) in query_set.iter() {
@@ -207,7 +210,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         }
 
         // v_i values
-        let mut v_values = batch_proof.batch_values.clone();
+        let mut v_values = vec![];
 
         // y_i values
         let mut y_values = vec![];
@@ -216,12 +219,18 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let mut points = vec![];
 
         for (_point_label, (point, labels)) in query_to_labels_map.into_iter() {
-            for label in labels.into_iter() {
+            for &label in labels.iter() {
                 let y_i = values
                     .get(&(label.clone(), *point))
                     .ok_or(Error::MissingEvaluation {
                         label: label.to_string(),
                     })?;
+                let v_i = batch_proof.batch_values
+                    .get(&label.clone())
+                    .ok_or(Error::MissingEvaluation {
+                        label: label.to_string(),
+                    })?;
+                v_values.push(*v_i);
                 y_values.push(*y_i);
                 points.push(point);
             }
@@ -230,6 +239,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         // Commitment of the h(X) polynomial
         let batch_commitment = batch_proof.batch_commitment;
 
+        // TODO: When we will move to Sponge-based construction, we will absorb the
+        //       batch_commitment only and then squeeze a new challenge
         // Fresh random challenge x
         let point = Self::compute_random_oracle_challenge(
             &to_bytes![
@@ -247,7 +258,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
         let mut computed_batch_v = G::ScalarField::zero();
 
-        for ((v_i, y_i), x_i) in v_values.clone().into_iter().zip(y_values.clone()).zip(points.clone()) {
+        for ((&v_i, y_i), x_i) in v_values.iter().zip(y_values).zip(points) {
 
             computed_batch_v = computed_batch_v + &(cur_challenge * &((v_i - &y_i) / &(point - x_i)));
 
@@ -259,7 +270,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         v_values.push(computed_batch_v);
 
         // The commitment to h(X) polynomial added to the check
-        let mut commitments = commitments.clone().into_iter().collect::<Vec<&'a LabeledCommitment<Commitment<G>>>>();
+        let mut commitments = commitments;
         let labeled_batch_commitment = LabeledCommitment::new(
             format!("Batch"),
             Commitment { comm: batch_commitment, shifted_comm: None },
@@ -267,11 +278,20 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         );
         commitments.push(&labeled_batch_commitment);
 
-        end_timer!(batch_check_time);
-
         let proof = &batch_proof.proof;
+        end_timer!(evals_time);
 
-        let check_time = start_timer!(|| "Checking evaluations");
+        let check_time = start_timer!(|| "Succinct check batched polynomial");
+        let opening_challenge = Self::compute_random_oracle_challenge(
+            &to_bytes![
+                batch_proof.batch_values.values().collect::<Vec<&G::ScalarField>>(),
+                batch_commitment,
+                point
+            ]
+                .unwrap(),
+        );
+        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
+
         let d = vk.supported_degree();
 
         // `log_d` is ceil(log2 (d + 1)), which is the number of steps to compute all of the challenges
@@ -288,7 +308,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             ));
         }
 
-        let check_poly = Self::succinct_check(vk, commitments, point, v_values, proof, opening_challenges);
+        let check_poly = Self::succinct_check(vk, commitments, point, v_values, proof, &opening_challenges);
 
         if check_poly.is_none() {
             end_timer!(check_time);
@@ -296,6 +316,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         }
 
         end_timer!(check_time);
+        end_timer!(batch_check_time);
 
         Ok((check_poly.unwrap(), proof.final_comm_key))
     }
@@ -853,20 +874,28 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         })
     }
 
-    /// Refers to the "Multi-poly multi-point assertions" section of the "Recursive SNARKs based on Marlin" document
+    /// The multi-point "batching" according to Boneh, et al. 2020, "Efficient polynomial commitment schemes for multiple points and polynomials", https://eprint.iacr.org/2020/081.
     fn batch_open_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
-        labeled_polynomials: impl Clone + IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
-        commitments: impl Clone + IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
+        labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
+        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<G::ScalarField>,
+        // TODO: In order to implement the Fiat-Shamir transform in a "clean" manner,
+        //       we need to pass a sponge instead of opening_challenges().
+        //       This sponge is then used to squeeze the opening challenge(s) as well
+        //       as the fresh query point x
         opening_challenges: &dyn Fn(u64) -> G::ScalarField,
-        rands: impl Clone + IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a Self::Randomness>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<Self::BatchProof, Self::Error>
     where
         Self::Randomness: 'a,
         Self::Commitment: 'a,
     {
+        let labeled_polynomials: Vec<&'a LabeledPolynomial<G::ScalarField>> = labeled_polynomials.into_iter().map(|poly| poly).collect();
+        let commitments: Vec<&'a LabeledCommitment<Self::Commitment>> = commitments.into_iter().map(|comm| comm).collect();
+        let rands: Vec<&'a Self::Randomness> = rands.into_iter().map(|rand| rand).collect();
+
         let batch_time = start_timer!(|| "Multi poly multi point batching.");
 
         let mut opening_challenge_counter = 0;
@@ -878,8 +907,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let mut query_to_labels_map = BTreeMap::new();
 
         let poly_map: BTreeMap<_, _> = labeled_polynomials
-            .clone()
-            .into_iter()
+            .iter()
             .map(|poly| (poly.label(), poly))
             .collect();
 
@@ -895,9 +923,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         // h(X)
         let mut batch_polynomial = Polynomial::zero();
 
-        for (
-            _point_label, (point, labels),
-        ) in query_to_labels_map.into_iter() {
+        for (_point_label, (&point, labels)) in query_to_labels_map.iter() {
             for label in labels {
                 let labeled_polynomial =
                     poly_map.get(label).ok_or(Error::MissingPolynomial {
@@ -907,17 +933,17 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 points.push(point);
 
                 // y_i
-                let evaluated_y = labeled_polynomial.polynomial().evaluate(*point);
+                let evaluated_y = labeled_polynomial.polynomial().evaluate(point); 
 
                 // (p_i(X) - y_i) / (X - x_i)
-                let polynomial =
-                    &(labeled_polynomial.polynomial() - &Polynomial::from_coefficients_vec(vec![evaluated_y]))
-                        /
-                        &Polynomial::from_coefficients_vec(vec![
-                            (G::ScalarField::zero() - point),
-                            G::ScalarField::one()
-                        ]);
-
+                let polynomial = 
+                    &(labeled_polynomial.polynomial() - &Polynomial::from_coefficients_vec(vec![evaluated_y])) 
+                    / 
+                    &Polynomial::from_coefficients_vec(vec![
+                        (G::ScalarField::zero() - point), 
+                        G::ScalarField::one()
+                    ]);
+                
                 // h(X) = SUM( lambda^i * ((p_i(X) - y_i) / (X - x_i)) )
                 batch_polynomial += (cur_challenge, &polynomial);
 
@@ -935,6 +961,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             None,
         ).into_affine();
 
+        // TODO: When we will move to Sponge-based construction, we will absorb the batch_commitment
+        //       only and then squeeze a new challenge
         // Fresh random challenge x
         let point= Self::compute_random_oracle_challenge(
             &to_bytes![
@@ -945,13 +973,13 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         );
 
         // Values: v_i = p_i(x), where x is fresh random challenge
-        let mut batch_values = vec![];
-        for labeled_polynomial in labeled_polynomials.clone().into_iter() {
-            batch_values.push(labeled_polynomial.polynomial().evaluate(point));
-        }
+        let batch_values: BTreeMap<_, _> = labeled_polynomials
+            .iter()
+            .map(|labeled_polynomial| (labeled_polynomial.label().clone(), labeled_polynomial.polynomial().evaluate(point)))
+            .collect();
 
         // h(X) polynomial added to the set of polynomials for multi-poly single-point batching
-        let mut labeled_polynomials = labeled_polynomials.clone().into_iter().collect::<Vec<&'a LabeledPolynomial<G::ScalarField>>>();
+        let mut labeled_polynomials = labeled_polynomials;
         let labeled_batch_polynomial = LabeledPolynomial::new(
             format!("Batch"),
             batch_polynomial,
@@ -961,7 +989,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         labeled_polynomials.push(&labeled_batch_polynomial);
 
         // Commitment of h(X) polynomial added to the set of polynomials for multi-poly single-point batching
-        let mut commitments = commitments.clone().into_iter().collect::<Vec<&'a LabeledCommitment<Self::Commitment>>>();
+        let mut commitments = commitments;
         let labeled_batch_commitment = LabeledCommitment::new(
             format!("Batch"),
             Commitment { comm: batch_commitment, shifted_comm: None },
@@ -969,18 +997,28 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         );
         commitments.push(&labeled_batch_commitment);
 
-        let mut rands = rands.clone().into_iter().collect::<Vec<&'a Self::Randomness>>();
+        let mut rands = rands;
         let batch_randomness = Randomness::empty();
         rands.push(&batch_randomness);
 
         end_timer!(batch_time);
+
+        let opening_challenge = Self::compute_random_oracle_challenge(
+            &to_bytes![
+                batch_values.values().collect::<Vec<&G::ScalarField>>(),
+                batch_commitment,
+                point               
+            ]
+            .unwrap(),
+        );
+        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
 
         let proof = Self::open_individual_opening_challenges(
             ck,
             labeled_polynomials,
             commitments,
             point,
-            opening_challenges,
+            &opening_challenges,
             rands,
             rng
         )?;
@@ -1052,10 +1090,14 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
     fn batch_check_individual_opening_challenges<'a, R: RngCore>(
         vk: &Self::VerifierKey,
-        commitments: impl Clone + IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
+        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<G::ScalarField>,
         evaluations: &Evaluations<G::ScalarField>,
         batch_proof: &Self::BatchProof,
+        // TODO: In order to implement the Fiat-Shamir transform in a "clean" manner,
+        //       we need to pass a sponge instead of opening_challenges(). This sponge
+        //       is then used to squeeze the opening challenge(s) as well as the fresh
+        //       query point x
         opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rng: &mut R,
     ) -> Result<bool, Self::Error>
