@@ -27,7 +27,6 @@ struct BenchInfo {
 #[derive(Derivative)]
 #[derivative(Clone(bound = ""))]
 struct BenchVerifierData<'a, F: Field, PC: PolynomialCommitment<F>> {
-    vk:                      PC::VerifierKey,
     comms:                   Vec<LabeledCommitment<PC::Commitment>>,
     query_set:               QuerySet<'a, F>,
     values:                  Evaluations<'a, F>,
@@ -134,7 +133,6 @@ impl<'a, D, G> BenchVerifierData<'a, G::ScalarField, InnerProductArgPC<G, D>>
         };
 
         Self {
-            vk: vk.clone(),
             comms: labeled_comms,
             query_set,
             values,
@@ -183,7 +181,6 @@ fn bench_batch_verify_batch_proofs<G: AffineCurve, D: Digest>(
                     let mut opening_challenges = Vec::new();
 
                     verifier_data_vec.into_iter().for_each(|verifier_data| {
-                        assert_eq!(&verifier_data.vk, &vk); // Vk should be equal for all proofs
                         comms.push(verifier_data.comms);
                         query_sets.push(verifier_data.query_set);
                         evals.push(verifier_data.values);
