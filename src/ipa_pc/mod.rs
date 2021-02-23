@@ -548,8 +548,6 @@ impl<
                 combined_rand += &(cur_challenge * &randomness.rand);
             }
 
-            cur_challenge = ro.squeeze_128_bits_nonnative_field_elements(1)[0];
-
             let has_degree_bound = degree_bound.is_some();
 
             assert_eq!(
@@ -566,6 +564,8 @@ impl<
                 label
             );
             if let Some(degree_bound) = degree_bound {
+                cur_challenge = ro.squeeze_128_bits_nonnative_field_elements(1)[0];
+
                 let shifted_polynomial = Self::shift_polynomial(ck, polynomial, degree_bound);
                 combined_polynomial += (cur_challenge, &shifted_polynomial);
                 combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
