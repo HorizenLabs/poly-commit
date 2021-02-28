@@ -1,4 +1,4 @@
-use crate::{BTreeMap, BTreeSet, String, ToString, Vec};
+use crate::{BTreeMap, String, ToString, Vec};
 use crate::{BatchLCProof, Error, Evaluations, QuerySet};
 use crate::{LabeledCommitment, LabeledPolynomial, LinearCombination};
 use crate::{PCCommitterKey, PCRandomness, PCUniversalParams, Polynomial, PolynomialCommitment};
@@ -763,54 +763,43 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let mut cur_challenge = opening_challenges(opening_challenge_counter);
         opening_challenge_counter += 1;
 
-        let mut query_to_labels_map = BTreeMap::new();
-
         let poly_map: BTreeMap<_, _> = labeled_polynomials
             .iter()
             .map(|poly| (poly.label(), poly))
             .collect();
-
-        for (label, (point_label, point)) in query_set.iter() {
-            let labels = query_to_labels_map
-                .entry(point_label)
-                .or_insert((point, BTreeSet::new()));
-            labels.1.insert(label);
-        }
 
         let mut points = vec![];
 
         // h(X)
         let mut batch_polynomial = Polynomial::zero();
 
-        for (_point_label, (&point, labels)) in query_to_labels_map.iter() {
+        for (label, (_point_label, point)) in query_set.iter() {
 
-            for label in labels {
-                let labeled_polynomial =
-                    poly_map.get(label).ok_or(Error::MissingPolynomial {
-                        label: label.to_string(),
-                    })?;
+            let labeled_polynomial =
+                poly_map.get(label).ok_or(Error::MissingPolynomial {
+                    label: label.to_string(),
+                })?;
 
-                points.push(point);
+            points.push(point);
 
-                // y_i
-                let evaluated_y = labeled_polynomial.polynomial().evaluate(point); 
+            // y_i
+            let evaluated_y = labeled_polynomial.polynomial().evaluate(*point); 
 
-                // (p_i(X) - y_i) / (X - x_i)
-                let polynomial = 
-                    &(labeled_polynomial.polynomial() - &Polynomial::from_coefficients_vec(vec![evaluated_y])) 
-                    / 
-                    &Polynomial::from_coefficients_vec(vec![
-                        (G::ScalarField::zero() - point), 
-                        G::ScalarField::one()
-                    ]);
-                
-                // h(X) = SUM( lambda^i * ((p_i(X) - y_i) / (X - x_i)) )
-                batch_polynomial += (cur_challenge, &polynomial);
+            // (p_i(X) - y_i) / (X - x_i)
+            let polynomial = 
+                &(labeled_polynomial.polynomial() - &Polynomial::from_coefficients_vec(vec![evaluated_y])) 
+                / 
+                &Polynomial::from_coefficients_vec(vec![
+                    (G::ScalarField::zero() - point), 
+                    G::ScalarField::one()
+                ]);
+            
+            // h(X) = SUM( lambda^i * ((p_i(X) - y_i) / (X - x_i)) )
+            batch_polynomial += (cur_challenge, &polynomial);
 
-                // lambda^i
-                cur_challenge = opening_challenges(opening_challenge_counter);
-                opening_challenge_counter += 1;
-            }
+            // lambda^i
+            cur_challenge = opening_challenges(opening_challenge_counter);
+            opening_challenge_counter += 1;
         }
 
         // Commitment of the h(X) polynomial
@@ -957,14 +946,6 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let batch_check_time = start_timer!(|| "Multi poly multi point check batching");
 
-        let mut query_to_labels_map = BTreeMap::new();
-        for (label, (point_label, point)) in query_set.iter() {
-            let labels = query_to_labels_map
-                .entry(point_label)
-                .or_insert((point, BTreeSet::new()));
-            labels.1.insert(label);
-        }
-
         // v_i values
         let mut v_values = vec![];
 
@@ -974,22 +955,21 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         // x_i values
         let mut points = vec![];
 
-        for (_point_label, (point, labels)) in query_to_labels_map.into_iter() {
-            for &label in labels.iter() {
-                let y_i = evaluations
-                    .get(&(label.clone(), *point))
-                    .ok_or(Error::MissingEvaluation {
-                        label: label.to_string(),
-                    })?;
-                let v_i = batch_proof.batch_values
-                    .get(&label.clone())
-                    .ok_or(Error::MissingEvaluation {
-                        label: label.to_string(),
-                    })?;
-                v_values.push(*v_i);
-                y_values.push(*y_i);
-                points.push(point);
-            }
+        for (label, (_point_label, point)) in query_set.iter() {
+
+            let y_i = evaluations
+                .get(&(label.clone(), *point))
+                .ok_or(Error::MissingEvaluation {
+                    label: label.to_string(),
+                })?;
+            let v_i = batch_proof.batch_values
+                .get(&label.clone())
+                .ok_or(Error::MissingEvaluation {
+                    label: label.to_string(),
+                })?;
+            v_values.push(*v_i);
+            y_values.push(*y_i);
+            points.push(point);
         }
 
         // Commitment of the h(X) polynomial
@@ -1022,7 +1002,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         }
 
         // Reconstructed v value added to the check
-        v_values.push(computed_batch_v);
+        let mut values = batch_proof.batch_values.iter().map(|(_k, &v)| v).collect::<Vec<_>>();
+        values.push(computed_batch_v);
 
         // The commitment to h(X) polynomial added to the check
         let mut commitments = commitments;
@@ -1051,7 +1032,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             vk,
             commitments,
             point,
-            v_values,
+            values,
             proof,
             &opening_challenges,
             Some(rng)
