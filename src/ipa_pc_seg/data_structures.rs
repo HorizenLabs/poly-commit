@@ -262,7 +262,7 @@ pub struct BatchProof<G: AffineCurve> {
     pub proof: Proof<G>,
 
     /// Commitment of the h(X) polynomial
-    pub batch_comm: Vec<G>, 
+    pub batch_commitment: Vec<G>, 
 
     /// Values: v_i = p_i(x), where x is fresh random challenge
     pub batch_values: BTreeMap<String, G::ScalarField>
@@ -278,7 +278,7 @@ impl<G: AffineCurve> ToBytes for BatchProof<G> {
     #[inline]
     fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
         self.proof.write(&mut writer)?;
-        self.batch_comm.write(&mut writer)?;
+        self.batch_commitment.write(&mut writer)?;
         self.batch_values.values().collect::<Vec<&G::ScalarField>>().write(&mut writer)
     }
 }
