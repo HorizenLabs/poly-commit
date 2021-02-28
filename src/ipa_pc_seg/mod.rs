@@ -235,7 +235,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
                     })?;
                 let v_i = batch_proof.batch_values
                     .get(&label.clone())
-                    .ok_or(Error::MissingEvaluation {
+                    .ok_or(Error::MissingBatchEvaluation {
                         label: label.to_string(),
                     })?;
                 v_values.push(*v_i);
@@ -1304,7 +1304,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             let mut hiding_bound = None;
 
             let mut combined_comm = <G::Projective as ProjectiveCurve>::zero();
-            let mut combined_shifted_comm: Option<G::Projective> = None;
+            // let mut combined_shifted_comm: Option<G::Projective> = None;
 
             let mut combined_rand = G::ScalarField::zero();
             let mut combined_shifted_rand: Option<G::ScalarField> = None;
@@ -1341,11 +1341,11 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
                 let commitment = cur_comm.commitment();
                 combined_comm += &commitment.comm[0].mul(*coeff);
-                combined_shifted_comm = Self::combine_shifted_comm(
-                    combined_shifted_comm,
-                    commitment.shifted_comm,
-                    *coeff,
-                );
+                // combined_shifted_comm = Self::combine_shifted_comm(
+                //     combined_shifted_comm,
+                //     commitment.shifted_comm,
+                //     *coeff,
+                // );
             }
 
             let lc_poly =
@@ -1357,9 +1357,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             });
 
             lc_commitments.push(combined_comm);
-            if let Some(combined_shifted_comm) = combined_shifted_comm {
-                lc_commitments.push(combined_shifted_comm);
-            }
+            // if let Some(combined_shifted_comm) = combined_shifted_comm {
+            //     lc_commitments.push(combined_shifted_comm);
+            // }
 
             lc_info.push((lc_label, degree_bound));
         }
@@ -1409,7 +1409,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             // let mut degree_bound = None;
             let degree_bound = None;
             let mut combined_comm = <G::Projective as ProjectiveCurve>::zero();
-            let mut combined_shifted_comm: Option<G::Projective> = None;
+            // let mut combined_shifted_comm: Option<G::Projective> = None;
 
             for (coeff, label) in lc.iter() {
                 if label.is_one() {
@@ -1436,19 +1436,19 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
                     let commitment = cur_comm.commitment();
                     combined_comm += &commitment.comm[0].mul(*coeff);
-                    combined_shifted_comm = Self::combine_shifted_comm(
-                        combined_shifted_comm,
-                        commitment.shifted_comm,
-                        *coeff,
-                    );
+                    // combined_shifted_comm = Self::combine_shifted_comm(
+                    //     combined_shifted_comm,
+                    //     commitment.shifted_comm,
+                    //     *coeff,
+                    // );
                 }
             }
 
             lc_commitments.push(combined_comm);
 
-            if let Some(combined_shifted_comm) = combined_shifted_comm {
-                lc_commitments.push(combined_shifted_comm);
-            }
+            // if let Some(combined_shifted_comm) = combined_shifted_comm {
+            //     lc_commitments.push(combined_shifted_comm);
+            // }
 
             lc_info.push((lc_label, degree_bound));
         }
@@ -1798,13 +1798,13 @@ mod tests {
         println!("Finished tweedle_dee-blake2s");
     }
 
-    #[test]
-    #[should_panic]
-    fn bad_degree_bound_test() {
-        use crate::tests::*;
-        bad_degree_bound_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
-        println!("Finished tweedle_dee-blake2s");
-    }
+    // #[test]
+    // #[should_panic]
+    // fn bad_degree_bound_test() {
+    //     use crate::tests::*;
+    //     bad_degree_bound_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
+    //     println!("Finished tweedle_dee-blake2s");
+    // }
 
     #[test]
     fn polycommit_round_reduce_test() {

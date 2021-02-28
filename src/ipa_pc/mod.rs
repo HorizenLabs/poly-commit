@@ -227,7 +227,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
                     })?;
                 let v_i = batch_proof.batch_values
                     .get(&label.clone())
-                    .ok_or(Error::MissingEvaluation {
+                    .ok_or(Error::MissingBatchEvaluation {
                         label: label.to_string(),
                     })?;
                 v_values.push(*v_i);
