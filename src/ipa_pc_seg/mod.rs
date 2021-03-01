@@ -123,17 +123,17 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             cur_challenge = opening_challenges(opening_challenge_counter);
             opening_challenge_counter += 1;
 
-            // let degree_bound = labeled_commitment.degree_bound();
-            // assert_eq!(degree_bound.is_some(), commitment.shifted_comm.is_some());
+            let degree_bound = labeled_commitment.degree_bound();
+            assert_eq!(degree_bound.is_some(), commitment.shifted_comm.is_some());
 
-            // if let Some(degree_bound) = degree_bound {
-            //     let shift = point.pow([(vk.supported_degree() - degree_bound) as u64]);
-            //     combined_v += &(cur_challenge * &value * &shift);
-            //     combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
-            // }
+            if let Some(degree_bound) = degree_bound {
+                let shift = point.pow([(vk.supported_degree() - degree_bound) as u64]);
+                combined_v += &(cur_challenge * &value * &shift);
+                combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
+            }
 
-            // cur_challenge = opening_challenges(opening_challenge_counter);
-            // opening_challenge_counter += 1;
+            cur_challenge = opening_challenges(opening_challenge_counter);
+            opening_challenge_counter += 1;
         }
 
         let mut combined_commitment = combined_commitment_proj.into_affine();
@@ -333,23 +333,17 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         supported_degree: usize,
         p: &LabeledPolynomial<G::ScalarField>,
     ) -> Result<(), Error> {
-        // if p.degree() > supported_degree {
-        //     return Err(Error::TooManyCoefficients {
-        //         num_coefficients: p.degree() + 1,
-        //         num_powers: supported_degree + 1,
-        //     });
-        // }
 
-        // if let Some(bound) = p.degree_bound() {
-        //     if bound < p.degree() || bound > supported_degree {
-        //         return Err(Error::IncorrectDegreeBound {
-        //             poly_degree: p.degree(),
-        //             degree_bound: bound,
-        //             supported_degree,
-        //             label: p.label().to_string(),
-        //         });
-        //     }
-        // }
+        if let Some(bound) = p.degree_bound() {
+            if bound < p.degree() || bound > supported_degree {
+                return Err(Error::IncorrectDegreeBound {
+                    poly_degree: p.degree(),
+                    degree_bound: bound,
+                    supported_degree,
+                    label: p.label().to_string(),
+                });
+            }
+        }
 
         Ok(())
     }
@@ -720,39 +714,46 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             cur_challenge = opening_challenges(opening_challenge_counter);
             opening_challenge_counter += 1;
 
-            // let has_degree_bound = degree_bound.is_some();
+            let has_degree_bound;
 
-            // assert_eq!(
-            //     has_degree_bound,
-            //     commitment.shifted_comm.is_some(),
-            //     "shifted_comm mismatch for {}",
-            //     label
-            // );
+            if degree_bound.is_some() {
+                has_degree_bound = (degree_bound.unwrap() + 1) % n != 0;
+            } else {
+                has_degree_bound = false;
+            }
 
-            // assert_eq!(
-            //     degree_bound,
-            //     labeled_commitment.degree_bound(),
-            //     "labeled_comm degree bound mismatch for {}",
-            //     label
-            // );
-            // if let Some(degree_bound) = degree_bound {
-            //     let shifted_polynomial = Self::shift_polynomial(ck, polynomial, degree_bound);
-            //     combined_polynomial += (cur_challenge, &shifted_polynomial);
-            //     combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
+            assert_eq!(
+                has_degree_bound,
+                commitment.shifted_comm.is_some(),
+                "shifted_comm mismatch for {}",
+                label
+            );
 
-            //     if hiding_bound.is_some() {
-            //         let shifted_rand = randomness.shifted_rand;
-            //         assert!(
-            //             shifted_rand.is_some(),
-            //             "shifted_rand.is_none() for {}",
-            //             label
-            //         );
-            //         combined_rand += &(cur_challenge * &shifted_rand.unwrap());
-            //     }
-            // }
+            assert_eq!(
+                degree_bound,
+                labeled_commitment.degree_bound(),
+                "labeled_comm degree bound mismatch for {}",
+                label
+            );
 
-            // cur_challenge = opening_challenges(opening_challenge_counter);
-            // opening_challenge_counter += 1;
+            if let Some(degree_bound) = degree_bound {
+                let shifted_polynomial = Self::shift_polynomial(ck, polynomial, degree_bound);
+                combined_polynomial += (cur_challenge, &shifted_polynomial);
+                combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
+
+                if hiding_bound.is_some() {
+                    let shifted_rand = randomness.shifted_rand;
+                    assert!(
+                        shifted_rand.is_some(),
+                        "shifted_rand.is_none() for {}",
+                        label
+                    );
+                    combined_rand += &(cur_challenge * &shifted_rand.unwrap());
+                }
+            }
+
+            cur_challenge = opening_challenges(opening_challenge_counter);
+            opening_challenge_counter += 1;
         }
 
         end_timer!(combine_time);
@@ -1299,12 +1300,11 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         for lc in lc_s {
             let lc_label = lc.label().clone();
             let mut poly = Polynomial::zero();
-            // let mut degree_bound = None;
-            let degree_bound = None;
+            let mut degree_bound = None;
             let mut hiding_bound = None;
 
             let mut combined_comm = <G::Projective as ProjectiveCurve>::zero();
-            // let mut combined_shifted_comm: Option<G::Projective> = None;
+            let mut combined_shifted_comm: Option<G::Projective> = None;
 
             let mut combined_rand = G::ScalarField::zero();
             let mut combined_shifted_rand: Option<G::ScalarField> = None;
@@ -1317,16 +1317,16 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                         label: label.to_string(),
                     })?;
 
-                // if num_polys == 1 && cur_poly.degree_bound().is_some() {
-                //     assert!(
-                //         coeff.is_one(),
-                //         "Coefficient must be one for degree-bounded equations"
-                //     );
-                //     degree_bound = cur_poly.degree_bound();
-                // } else if cur_poly.degree_bound().is_some() {
-                //     eprintln!("Degree bound when number of equations is non-zero");
-                //     return Err(Self::Error::EquationHasDegreeBounds(lc_label));
-                // }
+                if num_polys == 1 && cur_poly.degree_bound().is_some() {
+                    assert!(
+                        coeff.is_one(),
+                        "Coefficient must be one for degree-bounded equations"
+                    );
+                    degree_bound = cur_poly.degree_bound();
+                } else if cur_poly.degree_bound().is_some() {
+                    eprintln!("Degree bound when number of equations is non-zero");
+                    return Err(Self::Error::EquationHasDegreeBounds(lc_label));
+                }
 
                 // Some(_) > None, always.
                 hiding_bound = std::cmp::max(hiding_bound, cur_poly.hiding_bound());
@@ -1341,11 +1341,11 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
                 let commitment = cur_comm.commitment();
                 combined_comm += &commitment.comm[0].mul(*coeff);
-                // combined_shifted_comm = Self::combine_shifted_comm(
-                //     combined_shifted_comm,
-                //     commitment.shifted_comm,
-                //     *coeff,
-                // );
+                combined_shifted_comm = Self::combine_shifted_comm(
+                    combined_shifted_comm,
+                    commitment.shifted_comm,
+                    *coeff,
+                );
             }
 
             let lc_poly =
@@ -1357,9 +1357,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             });
 
             lc_commitments.push(combined_comm);
-            // if let Some(combined_shifted_comm) = combined_shifted_comm {
-            //     lc_commitments.push(combined_shifted_comm);
-            // }
+            if let Some(combined_shifted_comm) = combined_shifted_comm {
+                lc_commitments.push(combined_shifted_comm);
+            }
 
             lc_info.push((lc_label, degree_bound));
         }
@@ -1406,10 +1406,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             let lc_label = lc.label().clone();
             let num_polys = lc.len();
 
-            // let mut degree_bound = None;
-            let degree_bound = None;
+            let mut degree_bound = None;
             let mut combined_comm = <G::Projective as ProjectiveCurve>::zero();
-            // let mut combined_shifted_comm: Option<G::Projective> = None;
+            let mut combined_shifted_comm: Option<G::Projective> = None;
 
             for (coeff, label) in lc.iter() {
                 if label.is_one() {
@@ -1424,31 +1423,31 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                         label: label.to_string(),
                     })?;
 
-                    // if num_polys == 1 && cur_comm.degree_bound().is_some() {
-                    //     assert!(
-                    //         coeff.is_one(),
-                    //         "Coefficient must be one for degree-bounded equations"
-                    //     );
-                    //     degree_bound = cur_comm.degree_bound();
-                    // } else if cur_comm.degree_bound().is_some() {
-                    //     return Err(Self::Error::EquationHasDegreeBounds(lc_label));
-                    // }
+                    if num_polys == 1 && cur_comm.degree_bound().is_some() {
+                        assert!(
+                            coeff.is_one(),
+                            "Coefficient must be one for degree-bounded equations"
+                        );
+                        degree_bound = cur_comm.degree_bound();
+                    } else if cur_comm.degree_bound().is_some() {
+                        return Err(Self::Error::EquationHasDegreeBounds(lc_label));
+                    }
 
                     let commitment = cur_comm.commitment();
                     combined_comm += &commitment.comm[0].mul(*coeff);
-                    // combined_shifted_comm = Self::combine_shifted_comm(
-                    //     combined_shifted_comm,
-                    //     commitment.shifted_comm,
-                    //     *coeff,
-                    // );
+                    combined_shifted_comm = Self::combine_shifted_comm(
+                        combined_shifted_comm,
+                        commitment.shifted_comm,
+                        *coeff,
+                    );
                 }
             }
 
             lc_commitments.push(combined_comm);
 
-            // if let Some(combined_shifted_comm) = combined_shifted_comm {
-            //     lc_commitments.push(combined_shifted_comm);
-            // }
+            if let Some(combined_shifted_comm) = combined_shifted_comm {
+                lc_commitments.push(combined_shifted_comm);
+            }
 
             lc_info.push((lc_label, degree_bound));
         }
