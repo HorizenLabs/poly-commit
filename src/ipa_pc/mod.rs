@@ -44,7 +44,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
     /// Create a Pedersen commitment to `scalars` using the commitment key `comm_key`.
     /// Optionally, randomize the commitment using `hiding_generator` and `randomizer`.
-    fn cm_commit(
+    pub fn cm_commit(
         comm_key: &[G],
         scalars: &[G::ScalarField],
         hiding_generator: Option<G>,
@@ -62,7 +62,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         comm
     }
 
-    fn compute_random_oracle_challenge(bytes: &[u8]) -> G::ScalarField {
+    pub fn compute_random_oracle_challenge(bytes: &[u8]) -> G::ScalarField {
         let mut i = 0u64;
         let mut challenge = None;
         while challenge.is_none() {
@@ -83,7 +83,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
     /// The succinct portion of `PC::check`. This algorithm runs in time
     /// O(log d), where d is the degree of the committed polynomials.
-    fn succinct_check<'a>(
+    pub fn succinct_check<'a>(
         vk: &VerifierKey<G>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Commitment<G>>>,
         point: G::ScalarField,
@@ -186,7 +186,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
     /// Perform the succinct check of proof, returning the succinct check polynomial (the xi_s)
     /// and the GFinal.
-    fn succinct_batch_check_individual_opening_challenges<'a, R: RngCore>(
+    pub fn succinct_batch_check_individual_opening_challenges<'a, R: RngCore>(
         vk: &VerifierKey<G>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Commitment<G>>>,
         query_set: &QuerySet<G::ScalarField>,
@@ -319,6 +319,57 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         end_timer!(batch_check_time);
 
         Ok((check_poly.unwrap(), proof.final_comm_key))
+    }
+
+    /// Succinct verify proofs and, if valid, return their SuccinctCheckPolynomials and GFinals.
+    pub fn succinct_batch_check<'a, R: RngCore>(
+        vk:                 &VerifierKey<G>,
+        commitments:        impl IntoIterator<Item = &'a [LabeledCommitment<Commitment<G>>]>,
+        query_sets:         impl IntoIterator<Item = &'a QuerySet<'a, G::ScalarField>>,
+        values:             impl IntoIterator<Item = &'a Evaluations<'a, G::ScalarField>>,
+        proofs:             impl IntoIterator<Item = &'a BatchProof<G>>,
+        opening_challenges: impl IntoIterator<Item = G::ScalarField>,
+        _rng:               &mut R,
+    ) -> Result<(Vec<SuccinctCheckPolynomial<G::ScalarField>>, Vec<G>), Error>
+    {
+        let comms = commitments.into_iter().collect::<Vec<_>>();
+        let query_sets = query_sets.into_iter().collect::<Vec<_>>();
+        let values = values.into_iter().collect::<Vec<_>>();
+        let proofs = proofs.into_iter().collect::<Vec<_>>();
+        let opening_challenges = opening_challenges.into_iter().collect::<Vec<_>>();
+
+        // Perform succinct verification of all the proofs and collect
+        // the xi_s and the GFinal_s into DLogAccumulators
+        let succinct_time = start_timer!(|| "Succinct verification of proofs");
+
+        let accumulators = comms.into_par_iter()
+            .zip(query_sets)
+            .zip(values)
+            .zip(proofs)
+            .zip(opening_challenges)
+            .map(|((((commitments, query_set), values), proof), opening_challenge)|
+                {
+                    // Perform succinct check of i-th proof
+                    let opening_challenge_f = |pow| opening_challenge.pow(&[pow]);
+                    let (challenges, final_comm_key) = Self::succinct_batch_check_individual_opening_challenges(
+                        vk,
+                        commitments,
+                        query_set,
+                        values,
+                        proof,
+                        &opening_challenge_f,
+                        &mut OsRng::default() // the rng doesn't matter
+                    ).unwrap();
+
+                    (final_comm_key, challenges)
+                }
+            ).collect::<Vec<_>>();
+        end_timer!(succinct_time);
+
+        let g_finals = accumulators.iter().map(|(g_final, _)| g_final.clone()).collect::<Vec<_>>();
+        let challenges = accumulators.into_iter().map(|(_, xi_s)| xi_s).collect::<Vec<_>>();
+
+        Ok((challenges, g_finals))
     }
 
     fn check_degrees_and_bounds(
