@@ -62,6 +62,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         comm
     }
 
+    /// Outputs a Field Element from a source that behaves like a random oracle
     pub fn compute_random_oracle_challenge(bytes: &[u8]) -> G::ScalarField {
         let mut i = 0u64;
         let mut challenge = None;
@@ -832,6 +833,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         combined_commitment = combined_commitment_proj.into_affine();
 
+        let mut round_challenges = Vec::with_capacity(log_d);
+
         // ith challenge
         let mut round_challenge = Self::compute_random_oracle_challenge(
             &to_bytes![combined_commitment, point, combined_v].unwrap(),
@@ -890,6 +893,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             round_challenge = Self::compute_random_oracle_challenge(
                 &to_bytes![round_challenge, lr[0], lr[1]].unwrap(),
             );
+            round_challenges.push(round_challenge);
+
             let round_challenge_inv = round_challenge.inverse().unwrap();
 
             Self::polycommit_round_reduce(
@@ -913,12 +918,14 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             n /= 2;
         }
 
+        assert_eq!(round_challenges.len(), log_d);
         end_timer!(proof_time);
 
         Ok(Proof {
             l_vec,
             r_vec,
             final_comm_key: comm_key[0],
+            xi_s: round_challenges,
             c: coeffs[0],
             hiding_comm: hiding_commitment,
             rand: combined_rand,

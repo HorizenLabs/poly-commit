@@ -210,7 +210,10 @@ pub struct Proof<G: AffineCurve> {
     /// Committer key from the last iteration within `open`
     pub final_comm_key: G,
 
-    /// Coefficient from the last iteration within withinopen`
+    /// Round challenges used for the Bullet reduction
+    pub xi_s: Vec<G::ScalarField>,
+
+    /// Coefficient from the last iteration within open`
     pub c: G::ScalarField,
 
     /// Commitment to the blinding polynomial.
@@ -234,6 +237,7 @@ impl<G: AffineCurve> ToBytes for Proof<G> {
         self.l_vec.write(&mut writer)?;
         self.r_vec.write(&mut writer)?;
         self.final_comm_key.write(&mut writer)?;
+        self.xi_s.write(&mut writer)?;
         self.c.write(&mut writer)?;
         self.hiding_comm
             .as_ref()
