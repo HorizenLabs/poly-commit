@@ -1547,6 +1547,12 @@ impl<
         end_timer!(poly_time);
 
         let open_time = start_timer!(|| "Produce opening proof for Bullet polys and GFin s");
+        let rands = (0..len).map(|i|
+            LabeledRandomness::new(
+                format!("check_poly_{}", i),
+                Randomness::<G>::empty(),
+            )
+        ).collect::<Vec<_>>();
         // Compute and return opening proof
         let result = Self::open_individual_opening_challenges(
             vk,
@@ -1554,7 +1560,7 @@ impl<
             comms.iter(),
             z,
             &opening_challenges,
-            vec![Randomness::<G>::empty(); len].iter(),
+            rands.iter(),
             Some(rng)
         ).unwrap();
         end_timer!(open_time);
