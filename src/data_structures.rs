@@ -209,6 +209,33 @@ impl<C: PCCommitment> algebra::ToBytes for LabeledCommitment<C> {
     }
 }
 
+/// A commitment along with information about its degree bound (if any).
+#[derive(Clone)]
+pub struct LabeledRandomness<R: PCRandomness> {
+    label: PolynomialLabel,
+    randomness: R,
+}
+
+impl<R: PCRandomness> LabeledRandomness<R> {
+    /// Instantiate a new polynomial_context.
+    pub fn new(label: PolynomialLabel, randomness: R) -> Self {
+        Self {
+            label,
+            randomness,
+        }
+    }
+
+    /// Return the label for `self`.
+    pub fn label(&self) -> &String {
+        &self.label
+    }
+
+    /// Retrieve the commitment from `self`.
+    pub fn randomness(&self) -> &R {
+        &self.randomness
+    }
+}
+
 /// A term in a linear combination.
 #[derive(Hash, Ord, PartialOrd, Clone, Eq, PartialEq, Debug)]
 pub enum LCTerm {

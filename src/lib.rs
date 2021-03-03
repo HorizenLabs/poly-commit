@@ -156,7 +156,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     ) -> Result<
         (
             Vec<LabeledCommitment<Self::Commitment>>,
-            Vec<Self::Randomness>,
+            Vec<LabeledRandomness<Self::Randomness>>,
         ),
         Self::Error,
     >;
@@ -169,7 +169,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         point: F,
         opening_challenge: F,
-        rands: impl IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<Self::Proof, Self::Error>
     where
@@ -196,7 +196,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         opening_challenge: F,
-        rands: impl IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<Self::BatchProof, Self::Error>
     where
@@ -277,7 +277,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         opening_challenge: F,
-        rands: impl IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<BatchLCProof<F, Self>, Self::Error>
     where
@@ -332,7 +332,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         point: F,
         opening_challenges: &dyn Fn(u64) -> F,
-        rands: impl IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<Self::Proof, Self::Error>
     where
@@ -346,7 +346,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         opening_challenges: &dyn Fn(u64) -> F,
-        rands: impl IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<Self::BatchProof, Self::Error>
     where
@@ -422,7 +422,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         opening_challenges: &dyn Fn(u64) -> F,
-        rands: impl IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<BatchLCProof<F, Self>, Self::Error>
     where
@@ -1148,6 +1148,23 @@ pub mod tests {
             num_polynomials: 1,
             enforce_degree_bounds: true,
             max_num_queries: 2,
+            ..Default::default()
+        };
+        test_template::<F, PC>(info)
+    }
+
+    pub fn two_poly_four_points_test<F, PC>() -> Result<(), PC::Error>
+    where
+        F: Field,
+        PC: PolynomialCommitment<F>,
+    {
+        let info = TestInfo {
+            num_iters: 1,
+            max_degree: Some(1024),
+            supported_degree: Some(1024),
+            num_polynomials: 2,
+            enforce_degree_bounds: true,
+            max_num_queries: 4,
             ..Default::default()
         };
         test_template::<F, PC>(info)
