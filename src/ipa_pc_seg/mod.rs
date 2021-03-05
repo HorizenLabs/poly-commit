@@ -125,18 +125,22 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
             let degree_bound = labeled_commitment.degree_bound();
 
-            if let Some(d) = degree_bound {
-                let d = d + 1; // Convert to the maximum number of coefficients
-                if d % n != 0 {                    
-                    assert_eq!(true, commitment.shifted_comm.is_some());
+            let d = degree_bound.and_then(|d| {
+                if (d + 1) % n != 0 { Some(d + 1) } else { None }
+            });
 
-                    let shift = point.pow([(vk.supported_degree() - degree_bound.unwrap()) as u64]);
-                    combined_v += &(cur_challenge * &value * &shift);
-                    combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
-    
-                    cur_challenge = opening_challenges(opening_challenge_counter);
-                    opening_challenge_counter += 1;
-                }
+            assert_eq!(
+                d.is_some(),
+                commitment.shifted_comm.is_some()
+            );
+
+            if d.is_some() {
+                let shift = point.pow([(vk.supported_degree() - degree_bound.unwrap()) as u64]);
+                combined_v += &(cur_challenge * &value * &shift);
+                combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
+
+                cur_challenge = opening_challenges(opening_challenge_counter);
+                opening_challenge_counter += 1;
             }
         }
 
@@ -399,21 +403,14 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             let label = info.0.clone();
             let degree_bound = info.1;
 
-            if let Some(d) = degree_bound {
-                let d = d + 1; // Convert to the maximum number of coefficients
-                if d % n != 0 {                    
-                    commitment = Commitment {
-                        comm: vec![comms[i].clone()],
-                        shifted_comm: Some(comms[i + 1].clone()),
-                    };
-                    i += 2;    
-                } else {
-                    commitment = Commitment {
-                        comm: vec![comms[i].clone()],
-                        shifted_comm: None,
-                    };
-                    i += 1;    
-                }
+            if degree_bound.and_then(|d| {
+                if (d + 1) % n == 0 { None } else { Some(d + 1) }
+            }).is_some() {
+                commitment = Commitment {
+                    comm: vec![comms[i].clone()],
+                    shifted_comm: Some(comms[i + 1].clone()),
+                };
+                i += 2;
             } else {
                 commitment = Commitment {
                     comm: vec![comms[i].clone()],
@@ -624,8 +621,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             // committing only last segment shifted to the right edge
             let shifted_comm = degree_bound.and_then(|d| {
                 let d = d + 1; // Convert to the maximum number of coefficients
-                if d % n == 0 { None }
-                else {
+                if d % n != 0 {
                     let shifted_polynomial = Self::shift_polynomial(ck, &Polynomial::from_coefficients_slice(&polynomial.coeffs[d - (d % n)..p]), degree_bound.unwrap());
                     Some(
                         Self::cm_commit(
@@ -635,6 +631,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                             randomness.shifted_rand,
                         ).into_affine()
                     )
+                } else {
+                    None
                 }
             });
 
@@ -720,40 +718,41 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             cur_challenge = opening_challenges(opening_challenge_counter);
             opening_challenge_counter += 1;
 
-            if let Some(d) = degree_bound {
-                let d = d + 1; // Convert to the maximum number of coefficients
-                if d % n != 0 {                    
-                    assert_eq!(
-                        true,
-                        commitment.shifted_comm.is_some(),
-                        "shifted_comm mismatch for {}",
+            let d = degree_bound.and_then(|d| {
+                if (d + 1) % n != 0 { Some(d + 1) } else { None }
+            });
+
+            assert_eq!(
+                d.is_some(),
+                commitment.shifted_comm.is_some(),
+                "shifted_comm mismatch for {}",
+                label
+            );
+
+            assert_eq!(
+                degree_bound,
+                labeled_commitment.degree_bound(),
+                "labeled_comm degree bound mismatch for {}",
+                label
+            );
+
+            if let Some(d) = d {
+                let shifted_polynomial = Self::shift_polynomial(ck, &Polynomial::from_coefficients_slice(&polynomial.coeffs[d - (d % n)..p]), degree_bound.unwrap());
+                combined_polynomial += (cur_challenge, &shifted_polynomial);
+                combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
+
+                if hiding_bound.is_some() {
+                    let shifted_rand = randomness.randomness().shifted_rand;
+                    assert!(
+                        shifted_rand.is_some(),
+                        "shifted_rand.is_none() for {}",
                         label
                     );
-        
-                    assert_eq!(
-                        degree_bound,
-                        labeled_commitment.degree_bound(),
-                        "labeled_comm degree bound mismatch for {}",
-                        label
-                    );    
-
-                    let shifted_polynomial = Self::shift_polynomial(ck, &Polynomial::from_coefficients_slice(&polynomial.coeffs[d - (d % n)..p]), degree_bound.unwrap());
-                    combined_polynomial += (cur_challenge, &shifted_polynomial);
-                    combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
-    
-                    if hiding_bound.is_some() {
-                        let shifted_rand = randomness.randomness().shifted_rand;
-                        assert!(
-                            shifted_rand.is_some(),
-                            "shifted_rand.is_none() for {}",
-                            label
-                        );
-                        combined_rand += &(cur_challenge * &shifted_rand.unwrap());
-                    }
-    
-                    cur_challenge = opening_challenges(opening_challenge_counter);
-                    opening_challenge_counter += 1;
+                    combined_rand += &(cur_challenge * &shifted_rand.unwrap());
                 }
+
+                cur_challenge = opening_challenges(opening_challenge_counter);
+                opening_challenge_counter += 1;
             }
         }
 
