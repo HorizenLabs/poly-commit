@@ -257,8 +257,17 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             opening_challenge_counter += 1;
         }
 
+        let mut batch_values = vec![];
+        for commitment in commitments.iter() {
+            let value = batch_proof.batch_values
+                .get(commitment.label())
+                .ok_or(Error::MissingEvaluation {
+                    label: commitment.label().to_string(),
+                })?;
+            batch_values.push(*value);
+        }
+
         // Reconstructed v value added to the check
-        let mut batch_values = batch_proof.batch_values.iter().map(|(_k, &v)| v).collect::<Vec<_>>();
         batch_values.push(computed_batch_v);
 
         // The commitment to h(X) polynomial added to the check
