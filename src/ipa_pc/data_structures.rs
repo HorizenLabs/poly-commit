@@ -28,12 +28,12 @@ impl<G: AffineCurve> PCUniversalParams for UniversalParams<G> {
 /// polynomial.
 #[derive(Derivative)]
 #[derivative(
-    Default(bound = ""),
-    Hash(bound = ""),
-    Clone(bound = ""),
-    Debug(bound = ""),
-    Eq(bound = ""),
-    PartialEq(bound = ""),
+Default(bound = ""),
+Hash(bound = ""),
+Clone(bound = ""),
+Debug(bound = ""),
+Eq(bound = ""),
+PartialEq(bound = ""),
 )]
 pub struct CommitterKey<G: AffineCurve> {
     /// The key used to commit to polynomials.
@@ -95,17 +95,16 @@ impl<G: AffineCurve> PCPreparedVerifierKey<VerifierKey<G>> for PreparedVerifierK
 /// Commitment to a polynomial that optionally enforces a degree bound.
 #[derive(Derivative)]
 #[derivative(
-    Default(bound = ""),
-    Hash(bound = ""),
-    Clone(bound = ""),
-    Copy(bound = ""),
-    Debug(bound = ""),
-    PartialEq(bound = ""),
-    Eq(bound = "")
+Default(bound = ""),
+Hash(bound = ""),
+Clone(bound = ""),
+Debug(bound = ""),
+PartialEq(bound = ""),
+Eq(bound = "")
 )]
 pub struct Commitment<G: AffineCurve> {
     /// A Pedersen commitment to the polynomial.
-    pub comm: G,
+    pub comm: Vec<G>,
 
     /// A Pedersen commitment to the shifted polynomial.
     /// This is `none` if the committed polynomial does not
@@ -117,7 +116,7 @@ impl<G: AffineCurve> PCCommitment for Commitment<G> {
     #[inline]
     fn empty() -> Self {
         Commitment {
-            comm: G::zero(),
+            comm: vec![G::zero()],
             shifted_comm: None,
         }
     }
@@ -127,7 +126,7 @@ impl<G: AffineCurve> PCCommitment for Commitment<G> {
     }
 
     fn size_in_bytes(&self) -> usize {
-        to_bytes![G::zero()].unwrap().len() / 2
+        (to_bytes![G::zero()].unwrap().len() / 2) * self.comm.len()
     }
 }
 
@@ -157,12 +156,12 @@ impl<G: AffineCurve> PCPreparedCommitment<Commitment<G>> for PreparedCommitment<
 /// `Randomness` hides the polynomial inside a commitment and is outputted by `InnerProductArg::commit`.
 #[derive(Derivative)]
 #[derivative(
-    Default(bound = ""),
-    Hash(bound = ""),
-    Clone(bound = ""),
-    Debug(bound = ""),
-    PartialEq(bound = ""),
-    Eq(bound = "")
+Default(bound = ""),
+Hash(bound = ""),
+Clone(bound = ""),
+Debug(bound = ""),
+PartialEq(bound = ""),
+Eq(bound = "")
 )]
 pub struct Randomness<G: AffineCurve> {
     /// Randomness is some scalar field element.
@@ -195,10 +194,10 @@ impl<G: AffineCurve> PCRandomness for Randomness<G> {
 /// `Proof` is an evaluation proof that is output by `InnerProductArg::open`.
 #[derive(Derivative)]
 #[derivative(
-    Default(bound = ""),
-    Hash(bound = ""),
-    Clone(bound = ""),
-    Debug(bound = "")
+Default(bound = ""),
+Hash(bound = ""),
+Clone(bound = ""),
+Debug(bound = "")
 )]
 pub struct Proof<G: AffineCurve> {
     /// Vector of left elements for each of the log_d iterations in `open`
@@ -251,10 +250,10 @@ impl<G: AffineCurve> ToBytes for Proof<G> {
 /// IACR preprint 2020/81 https://eprint.iacr.org/2020/081
 #[derive(Derivative)]
 #[derivative(
-    Default(bound = ""),
-    Hash(bound = ""),
-    Clone(bound = ""),
-    Debug(bound = "")
+Default(bound = ""),
+Hash(bound = ""),
+Clone(bound = ""),
+Debug(bound = "")
 )]
 pub struct BatchProof<G: AffineCurve> {
 
@@ -263,7 +262,7 @@ pub struct BatchProof<G: AffineCurve> {
     pub proof: Proof<G>,
 
     /// Commitment of the h(X) polynomial
-    pub batch_commitment: G, 
+    pub batch_commitment: Vec<G>,
 
     /// Values: v_i = p_i(x), where x is fresh random challenge
     pub batch_values: BTreeMap<String, G::ScalarField>
