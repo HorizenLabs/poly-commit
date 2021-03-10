@@ -58,7 +58,6 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             assert!(hiding_generator.is_some());
             comm += &hiding_generator.unwrap().mul(randomizer.unwrap());
         }
-
         comm
     }
 
@@ -632,8 +631,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                         Self::cm_commit(
                             &ck.comm_key,
                             &polynomial.coeffs[i * key_len..core::cmp::min((i + 1) * key_len, p_len)],
-                            Some(ck.s),
-                            Some(randomness.rand),
+                            if i > 0 { None } else { Some(ck.s) },
+                            if i > 0 { None } else { Some(randomness.rand) },
                         ).into_affine()
                     }
                 ).collect();
@@ -1803,6 +1802,13 @@ mod tests {
     fn full_end_to_end_test() {
         use crate::tests::*;
         full_end_to_end_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
+        println!("Finished tweedle_dee-blake2s");
+    }
+
+    #[test]
+    fn segmented_test() {
+        use crate::tests::*;
+        segmented_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
 
