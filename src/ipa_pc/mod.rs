@@ -568,6 +568,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let mut generators = Self::sample_generators(max_degree + 3);
         end_timer!(setup_time);
 
+        let hash = D::digest(&to_bytes![generators, max_degree as u32].unwrap()).to_vec();
+
         let h = generators.pop().unwrap();
         let s = generators.pop().unwrap();
 
@@ -575,6 +577,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             comm_key: generators,
             h,
             s,
+            hash,
         };
 
         Ok(pp)
@@ -600,6 +603,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             h: pp.h.clone(),
             s: pp.s.clone(),
             max_degree: pp.max_degree(),
+            hash: pp.hash.clone(),
         };
 
         let vk = VerifierKey {
@@ -607,6 +611,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             h: pp.h.clone(),
             s: pp.s.clone(),
             max_degree: pp.max_degree(),
+            hash: pp.hash.clone(),
         };
 
         end_timer!(trim_time);
