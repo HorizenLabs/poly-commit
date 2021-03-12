@@ -17,6 +17,13 @@ pub enum Error {
         label: String,
     },
 
+    /// `Evaluations` does not contain an evaluation for the polynomial labelled
+    /// `label` at a particular query.
+    MissingBatchEvaluation {
+        /// The label of the missing polynomial.
+        label: String,
+    },
+
     /// The LHS of the equation is empty.
     MissingLHS {
         /// The label of the equation.
@@ -98,6 +105,11 @@ impl std::fmt::Display for Error {
             Error::MissingEvaluation { label } => write!(
                 f,
                 "`QuerySet` refers to polynomial \"{}\", but `Evaluations` does not contain an evaluation for it.",
+                label
+            ),
+            Error::MissingBatchEvaluation { label } => write!(
+                f,
+                "`QuerySet` refers to polynomial \"{}\", but `BatchEvaluations` does not contain an evaluation for it.",
                 label
             ),
             Error::MissingLHS { label } => {

@@ -536,6 +536,28 @@ pub fn evaluate_query_set<'a, F: Field>(
     evaluations
 }
 
+/// Evaluate the given polynomials at `query_set` and returns a Vec<((poly_label, point_label), eval)>)
+pub fn evaluate_query_set_to_vec<'a, F: Field>(
+    polys: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
+    query_set: &QuerySet<'a, F>,
+) -> Vec<((String, String), F)>
+{
+    // use std::{
+    //     collections::BTreeMap,
+    //     iter::FromIterator,
+    // };
+    let polys = BTreeMap::from_iter(polys.into_iter().map(|p| (p.label(), p)));
+    let mut v = Vec::new();
+    for (label, (point_label, point)) in query_set {
+        let poly = polys
+            .get(label)
+            .expect("polynomial in evaluated lc is not found");
+        let eval = poly.evaluate(*point);
+        v.push(((label.clone(), point_label.clone()), eval));
+    }
+    v
+}
+
 fn lc_query_set_to_poly_query_set<'a, F: 'a + Field>(
     linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
     query_set: &QuerySet<F>,
@@ -571,6 +593,7 @@ pub mod tests {
         enforce_degree_bounds: bool,
         max_num_queries: usize,
         num_equations: Option<usize>,
+        segmented: bool
     }
 
     #[derive(Derivative)]
@@ -602,6 +625,7 @@ pub mod tests {
             num_polynomials,
             enforce_degree_bounds,
             max_num_queries,
+            segmented,
             ..
         } = info;
 
@@ -640,7 +664,7 @@ pub mod tests {
             } else {
                 0
             };
-            let poly = Polynomial::rand(degree, rng);
+            let poly = Polynomial::rand(degree * if segmented { 10 } else { 1 }, rng);
 
             let degree_bound = if let Some(degree_bounds) = &mut degree_bounds {
                 let range = rand::distributions::Uniform::from(degree..=supported_degree);
@@ -866,6 +890,7 @@ pub mod tests {
             enforce_degree_bounds,
             max_num_queries,
             num_equations,
+            ..
         } = info;
 
         let rng = &mut thread_rng();
@@ -1112,9 +1137,9 @@ pub mod tests {
     }
 
     pub fn two_poly_four_points_test<F, PC>() -> Result<(), PC::Error>
-        where
-            F: Field,
-            PC: PolynomialCommitment<F>,
+    where
+        F: Field,
+        PC: PolynomialCommitment<F>,
     {
         let info = TestInfo {
             num_iters: 1,
@@ -1174,6 +1199,24 @@ pub mod tests {
             num_polynomials: 10,
             enforce_degree_bounds: true,
             max_num_queries: 5,
+            ..Default::default()
+        };
+        test_template::<F, PC>(info)
+    }
+
+    pub fn segmented_test<F, PC>() -> Result<(), PC::Error>
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
+    {
+        let info = TestInfo {
+            num_iters: 1,
+            max_degree: None,
+            supported_degree: None,
+            num_polynomials: 10,
+            enforce_degree_bounds: false,
+            max_num_queries: 5,
+            segmented: true,
             ..Default::default()
         };
         test_template::<F, PC>(info)
@@ -1247,6 +1290,7 @@ pub mod tests {
             enforce_degree_bounds: true,
             max_num_queries: 5,
             num_equations: Some(10),
+            segmented: false,
         };
         equation_test_template::<F, PC>(info)
     }
@@ -1264,6 +1308,7 @@ pub mod tests {
             enforce_degree_bounds: false,
             max_num_queries: 1,
             num_equations: Some(1),
+            segmented: false,
         };
         equation_test_template::<F, PC>(info)
     }
@@ -1281,6 +1326,7 @@ pub mod tests {
             enforce_degree_bounds: false,
             max_num_queries: 1,
             num_equations: Some(2),
+            segmented: false,
         };
         equation_test_template::<F, PC>(info)
     }
@@ -1298,6 +1344,7 @@ pub mod tests {
             enforce_degree_bounds: true,
             max_num_queries: 1,
             num_equations: Some(2),
+            segmented: false,
         };
         equation_test_template::<F, PC>(info)
     }

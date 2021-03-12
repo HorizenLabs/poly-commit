@@ -104,14 +104,13 @@ impl<G: AffineCurve> PCPreparedVerifierKey<VerifierKey<G>> for PreparedVerifierK
 Default(bound = ""),
 Hash(bound = ""),
 Clone(bound = ""),
-Copy(bound = ""),
 Debug(bound = ""),
 PartialEq(bound = ""),
 Eq(bound = "")
 )]
 pub struct Commitment<G: AffineCurve> {
     /// A Pedersen commitment to the polynomial.
-    pub comm: G,
+    pub comm: Vec<G>,
 
     /// A Pedersen commitment to the shifted polynomial.
     /// This is `none` if the committed polynomial does not
@@ -123,7 +122,7 @@ impl<G: AffineCurve> PCCommitment for Commitment<G> {
     #[inline]
     fn empty() -> Self {
         Commitment {
-            comm: G::zero(),
+            comm: vec![G::zero()],
             shifted_comm: None,
         }
     }
@@ -133,7 +132,7 @@ impl<G: AffineCurve> PCCommitment for Commitment<G> {
     }
 
     fn size_in_bytes(&self) -> usize {
-        to_bytes![G::zero()].unwrap().len() / 2
+        (to_bytes![G::zero()].unwrap().len() / 2) * self.comm.len()
     }
 }
 
@@ -269,7 +268,7 @@ pub struct BatchProof<G: AffineCurve> {
     pub proof: Proof<G>,
 
     /// Commitment of the h(X) polynomial
-    pub batch_commitment: G,
+    pub batch_commitment: Vec<G>,
 
     /// Values: v_i = p_i(x), where x is fresh random challenge
     pub batch_values: BTreeMap<String, G::ScalarField>
@@ -287,30 +286,6 @@ impl<G: AffineCurve> ToBytes for BatchProof<G> {
         self.proof.write(&mut writer)?;
         self.batch_commitment.write(&mut writer)?;
         self.batch_values.values().collect::<Vec<&G::ScalarField>>().write(&mut writer)
-    }
-}
-
-/// This implements the public aggregator for the IPA/DLOG commitment scheme.
-#[derive(Clone)]
-pub struct DLogAccumulator<G: AffineCurve> {
-    /// Final committer key after the DLOG reduction.
-    pub(crate) g_final:    Commitment<G>,
-
-    /// Challenges of the DLOG reduction.
-    pub(crate) xi_s:       SuccinctCheckPolynomial<G::ScalarField>
-}
-
-impl<G: AffineCurve> PCAccumulator for DLogAccumulator<G>
-{
-    type Commitment = Commitment<G>;
-    type SuccinctDescription = SuccinctCheckPolynomial<G::ScalarField>;
-}
-
-impl<G: AffineCurve> ToBytes for DLogAccumulator<G> {
-    #[inline]
-    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        self.g_final.write(&mut writer)?;
-        self.xi_s.write(&mut writer)
     }
 }
 
