@@ -1,6 +1,6 @@
 use crate::*;
 use crate::{PCCommitterKey, PCVerifierKey, Vec};
-use algebra::{Field, ToBytes, to_bytes, UniformRand, AffineCurve};
+use algebra::{Field, PrimeField, ToBytes, to_bytes, UniformRand, AffineCurve};
 use std::vec;
 use rand_core::RngCore;
 
@@ -318,9 +318,9 @@ impl<G: AffineCurve> ToBytes for DLogAccumulator<G> {
 /// generated from the `log_d` random oracle challenges generated in `open`.
 /// It has the special property that can be evaluated in `O(log_d)` time.
 #[derive(Clone)]
-pub struct SuccinctCheckPolynomial<F: Field>(pub Vec<F>);
+pub struct SuccinctCheckPolynomial<F: PrimeField>(pub Vec<F>);
 
-impl<F: Field> SuccinctCheckPolynomial<F> {
+impl<F: PrimeField> SuccinctCheckPolynomial<F> {
 
     /// Slighlty optimized way to compute it, taken from
     /// [o1-labs/marlin](https://github.com/o1-labs/marlin/blob/master/dlog/commitment/src/commitment.rs#L175)
@@ -365,7 +365,7 @@ impl<F: Field> SuccinctCheckPolynomial<F> {
     }
 }
 
-impl<F: Field> ToBytes for SuccinctCheckPolynomial<F> {
+impl<F: PrimeField> ToBytes for SuccinctCheckPolynomial<F> {
     #[inline]
     fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
         self.0.write(&mut writer)
