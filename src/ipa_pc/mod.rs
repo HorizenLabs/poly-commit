@@ -95,6 +95,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
         assert_eq!(key_len.next_power_of_two(), key_len);
 
+        let batch_time = start_timer!(|| "Compute and batch Bullet Polys and GFin commitments");
         let xi_s_vec = xi_s.into_iter().collect::<Vec<_>>();
         let g_fins = g_fins.into_iter().collect::<Vec<_>>();
 
@@ -153,6 +154,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             }).reduce(|| (Polynomial::zero(), <G::Projective as ProjectiveCurve>::zero()), |acc, poly_comm| (&acc.0 + &poly_comm.0, acc.1 + &poly_comm.1));
 
         let combined_v: G::ScalarField = values.into_par_iter().sum();
+        end_timer!(batch_time);
 
         let proof_time =
             start_timer!(|| format!("Generating proof for degree {} combined polynomial", d + 1));
