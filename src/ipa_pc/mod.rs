@@ -33,6 +33,7 @@ use rand_core::OsRng;
 ///
 /// [pcdas]: https://eprint.iacr.org/2020/499
 /// [marlin]: https://eprint.iacr.org/2019/1047
+#[derive(Clone)]
 pub struct InnerProductArgPC<G: AffineCurve, D: Digest> {
     _projective: PhantomData<G>,
     _digest: PhantomData<D>,
