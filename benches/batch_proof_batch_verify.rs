@@ -39,7 +39,7 @@ where
     G: AffineCurve,
     D: Digest,
 {
-    pub fn generate_vk<R: RngCore>(rng: &mut R, info: &BenchInfo) -> VerifierKey<G> {
+    pub fn generate_vk(info: &BenchInfo) -> VerifierKey<G> {
         let BenchInfo {
             max_degree,
             supported_degree,
@@ -47,12 +47,10 @@ where
         } = info.clone();
 
         // Generate random params
-        let pp = InnerProductArgPC::<G, D>::setup(max_degree, rng).unwrap();
+        let pp = InnerProductArgPC::<G, D>::setup(max_degree).unwrap();
         let (_, vk) = InnerProductArgPC::<G, D>::trim(
             &pp,
             supported_degree,
-            0, // unused
-            None, // unused
         ).unwrap();
 
         assert!(
@@ -86,7 +84,7 @@ where
 
             let degree_bound_requested = degree_bounds[i];
             let comm = Commitment::<G>{
-                comm: G::Projective::rand(rng).into_affine(),
+                comm: vec![G::Projective::rand(rng).into_affine()],
                 shifted_comm: if degree_bound_requested { Some(G::Projective::rand(rng).into_affine()) } else { None }
             };
 
@@ -127,7 +125,7 @@ where
             .collect();
         let batch_proof = BatchProof::<G> {
             proof,
-            batch_commitment: G::Projective::rand(rng).into_affine(),
+            batch_commitment: vec![G::Projective::rand(rng).into_affine()],
             batch_values,
         };
 
@@ -149,7 +147,6 @@ fn bench_batch_verify_batch_proofs<G: AffineCurve, D: Digest>(
     num_commitments: usize,
     num_proofs_to_bench: Vec<usize>,
 ) {
-    let rng = &mut XorShiftRng::seed_from_u64(1234567890u64);
     let mut group = c.benchmark_group(bench_name);
 
     let info = BenchInfo {
@@ -160,7 +157,7 @@ fn bench_batch_verify_batch_proofs<G: AffineCurve, D: Digest>(
         hiding_bound: false, // Unless we use zk
         num_queries: 5
     };
-    let vk = BenchVerifierData::<G::ScalarField, InnerProductArgPC<G, D>>::generate_vk(rng, &info);
+    let vk = BenchVerifierData::<G::ScalarField, InnerProductArgPC<G, D>>::generate_vk(&info);
 
     for num_proofs in num_proofs_to_bench.into_iter() {
         group.bench_with_input(BenchmarkId::from_parameter(num_proofs), &num_proofs, |bn, num_proofs| {

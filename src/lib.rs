@@ -38,32 +38,6 @@ pub use error::*;
 /// checker.
 pub mod optional_rng;
 
-/*/// The core [[KZG10]][kzg] construction.
-///
-/// [kzg]: http://cacr.uwaterloo.ca/techreports/2010/cacr2010-10.pdf
-pub mod kzg10;
-
-/// Polynomial commitment scheme from [[KZG10]][kzg] that enforces
-/// strict degree bounds and (optionally) enables hiding commitments by
-/// following the approach outlined in [[CHMMVW20, "Marlin"]][marlin].
-///
-/// [kzg]: http://cacr.uwaterloo.ca/techreports/2010/cacr2010-10.pdf
-/// [marlin]: https://eprint.iacr.org/2019/1047
-pub mod marlin_pc;
-
-/// Polynomial commitment scheme based on the construction in [[KZG10]][kzg],
-/// modified to obtain batching and to enforce strict
-/// degree bounds by following the approach outlined in [[MBKM19,
-/// “Sonic”]][sonic] (more precisely, via the variant in
-/// [[Gabizon19, “AuroraLight”]][al] that avoids negative G1 powers).
-///
-/// [kzg]: http://cacr.uwaterloo.ca/techreports/2010/cacr2010-10.pdf
-/// [sonic]: https://eprint.iacr.org/2019/099
-/// [al]: https://eprint.iacr.org/2019/601
-/// [marlin]: https://eprint.iacr.org/2019/1047
-pub mod sonic_pc;
-*/
-
 /// A polynomial commitment scheme based on the hardness of the
 /// discrete logarithm problem in prime-order groups.
 /// The construction is detailed in [[BCMS20]][pcdas].
@@ -123,9 +97,8 @@ pub trait PolynomialCommitment<F: Field>: Sized {
 
     /// Constructs public parameters when given as input the maximum degree `degree`
     /// for the polynomial commitment scheme.
-    fn setup<R: RngCore>(
+    fn setup(
         max_degree: usize,
-        rng: &mut R,
     ) -> Result<Self::UniversalParams, Self::Error>;
 
     /// Specializes the public parameters for polynomials up to the given `supported_degree`
@@ -133,8 +106,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     fn trim(
         pp: &Self::UniversalParams,
         supported_degree: usize,
-        supported_hiding_bound: usize,
-        enforced_degree_bounds: Option<&[usize]>,
     ) -> Result<(Self::CommitterKey, Self::VerifierKey), Self::Error>;
 
     /// Outputs a commitments to `polynomials`. If `polynomials[i].is_hiding()`,
@@ -221,7 +192,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         values: impl IntoIterator<Item = F>,
         proof: &Self::Proof,
         opening_challenge: F,
-        rng: Option<&mut dyn RngCore>,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a,
@@ -234,20 +204,18 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             values,
             proof,
             &opening_challenges,
-            rng,
         )
     }
 
     /// Checks that `values` are the true evaluations at `query_set` of the polynomials
     /// committed in `labeled_commitments`.
-    fn batch_check<'a, R: RngCore>(
+    fn batch_check<'a>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         evaluations: &Evaluations<F>,
         proof: &Self::BatchProof,
         opening_challenge: F,
-        rng: &mut R,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a,
@@ -260,7 +228,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             evaluations,
             proof,
             &opening_challenges,
-            rng,
         )
     }
 
@@ -296,7 +263,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
 
     /// Checks that `evaluations` are the true evaluations at `query_set` of the
     /// linear combinations of polynomials committed in `commitments`.
-    fn check_combinations<'a, R: RngCore>(
+    fn check_combinations<'a>(
         vk: &Self::VerifierKey,
         linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
@@ -304,7 +271,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         eqn_evaluations: &Evaluations<F>,
         proof: &BatchLCProof<F, Self>,
         opening_challenge: F,
-        rng: &mut R,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a,
@@ -318,7 +284,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             eqn_evaluations,
             proof,
             &opening_challenges,
-            rng,
         )
     }
 
@@ -358,20 +323,18 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         values: impl IntoIterator<Item = F>,
         proof: &Self::Proof,
         opening_challenges: &dyn Fn(u64) -> F,
-        rng: Option<&mut dyn RngCore>,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a;
 
     /// batch_check but with individual challenges
-    fn batch_check_individual_opening_challenges<'a, R: RngCore>(
+    fn batch_check_individual_opening_challenges<'a>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         evaluations: &Evaluations<F>,
         proof: &Self::BatchProof,
         opening_challenges: &dyn Fn(u64) -> F,
-        rng: &mut R,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a;
@@ -384,7 +347,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         values: impl IntoIterator<Item = &'a Evaluations<'a, F>>,
         proofs: impl IntoIterator<Item = &'a Self::BatchProof>,
         opening_challenges: impl IntoIterator<Item = F>,
-        rng: &mut R,
+        _rng: &mut R,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a,
@@ -405,7 +368,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
                     values,
                     proof,
                     &opening_challenge_f,
-                    rng
                 )?;
             }
         Ok(result)
@@ -447,7 +409,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     }
 
     /// check_combinations with individual challenges
-    fn check_combinations_individual_opening_challenges<'a, R: RngCore>(
+    fn check_combinations_individual_opening_challenges<'a>(
         vk: &Self::VerifierKey,
         linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
@@ -455,7 +417,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         eqn_evaluations: &Evaluations<F>,
         proof: &BatchLCProof<F, Self>,
         opening_challenges: &dyn Fn(u64) -> F,
-        rng: &mut R,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a,
@@ -507,7 +468,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             &poly_evals,
             proof,
             opening_challenges,
-            rng,
         )?;
 
         if !pc_result {
@@ -632,7 +592,7 @@ pub mod tests {
         let rng = &mut thread_rng();
         let max_degree =
             max_degree.unwrap_or(rand::distributions::Uniform::from(2..=64).sample(rng));
-        let pp = if pp.is_some() { pp.unwrap() } else { PC::setup(max_degree, rng)? };
+        let pp = if pp.is_some() { pp.unwrap() } else { PC::setup(max_degree)? };
 
         let supported_degree = match supported_degree {
             Some(0) => 0,
@@ -700,8 +660,6 @@ pub mod tests {
         let (ck, vk) = PC::trim(
             &pp,
             supported_degree,
-            supported_hiding_bound,
-            degree_bounds.as_ref().map(|s| s.as_slice()),
         )?;
         println!("Trimmed");
 
@@ -753,7 +711,7 @@ pub mod tests {
     {
         let rng = &mut thread_rng();
         let max_degree = 100;
-        let pp = PC::setup(max_degree, rng)?;
+        let pp = PC::setup(max_degree)?;
 
         for _ in 0..10 {
             let supported_degree = rand::distributions::Uniform::from(1..=max_degree).sample(rng);
@@ -793,8 +751,6 @@ pub mod tests {
             let (ck, vk) = PC::trim(
                 &pp,
                 supported_degree,
-                supported_hiding_bound,
-                Some(degree_bounds.as_slice()),
             )?;
             println!("Trimmed");
 
@@ -827,7 +783,6 @@ pub mod tests {
                 &values,
                 &proof,
                 opening_challenge,
-                rng,
             )?;
             assert!(result, "proof was incorrect, Query set: {:#?}", query_set);
         }
@@ -860,7 +815,6 @@ pub mod tests {
                 &values,
                 &proof,
                 opening_challenge,
-                &mut thread_rng(),
             )?;
             if !result {
                 println!(
@@ -896,7 +850,7 @@ pub mod tests {
         let rng = &mut thread_rng();
         let max_degree =
             max_degree.unwrap_or(rand::distributions::Uniform::from(2..=64).sample(rng));
-        let pp = PC::setup(max_degree, rng)?;
+        let pp = PC::setup(max_degree)?;
 
         for _ in 0..num_iters {
             let supported_degree = supported_degree
@@ -960,8 +914,6 @@ pub mod tests {
             let (ck, vk) = PC::trim(
                 &pp,
                 supported_degree,
-                supported_degree,
-                degree_bounds.as_ref().map(|s| s.as_slice()),
             )?;
             println!("Trimmed");
 
@@ -1030,7 +982,6 @@ pub mod tests {
                 &values,
                 &proof,
                 opening_challenge,
-                rng,
             )?;
             if !result {
                 println!(
@@ -1240,7 +1191,7 @@ pub mod tests {
             ..Default::default()
         };
 
-        let pp = PC::setup(max_degree, rng)?;
+        let pp = PC::setup(max_degree)?;
 
         for num_proofs in 1..10 {
             // Generate all proofs and the data needed by the verifier to verify them
