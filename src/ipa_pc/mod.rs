@@ -85,6 +85,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
     /// Computes an opening proof of multiple check polynomials with a corresponding
     /// commitment GFin opened at point.
+    /// No segmentation here: Bullet Polys are at most as big as the committer key.
     pub fn open_check_polys<'a>(
         ck: &CommitterKey<G>,
         xi_s: impl IntoIterator<Item = &'a SuccinctCheckPolynomial<G::ScalarField>>,
@@ -92,10 +93,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         point: G::ScalarField,
     ) -> Result<Proof<G>, Error>
     {
-        let key_len = ck.comm_key.len();
-        let log_key_len = algebra::log2(key_len) as usize;
-
-        assert_eq!(key_len.next_power_of_two(), key_len);
+        let mut key_len = ck.comm_key.len();
+        assert_eq!(ck.comm_key.len().next_power_of_two(), key_len);
 
         let batch_time = start_timer!(|| "Compute and batch Bullet Polys and GFin commitments");
         let xi_s_vec = xi_s.into_iter().collect::<Vec<_>>();
@@ -120,42 +119,28 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         }
 
         // Compute combined check_poly and combined g_fin
-        let (combined_check_poly, combined_g_fin) = batching_chal_pows
+        let (mut combined_check_poly, combined_g_fin, combined_v) = batching_chal_pows
             .into_par_iter()
             .zip(xi_s_vec)
+            .zip(values)
             .zip(g_fins)
-            .map(|((chal, xi_s), g_fin)| {
+            .map(|(((chal, xi_s), value), g_fin)| {
+                (
+                    Polynomial::from_coefficients_vec(xi_s.compute_scaled_coeffs(chal)),
+                    g_fin.comm[0].mul(chal),
+                    chal * value
+                )
+            }).reduce(
+                || (Polynomial::zero(), <G::Projective as ProjectiveCurve>::zero(), G::ScalarField::zero()),
+                |acc, poly_comm_val| (&acc.0 + &poly_comm_val.0, acc.1 + &poly_comm_val.1, acc.2 + &poly_comm_val.2)
+            );
 
-                // Combine i-th check poly with the i-th challenge
-                let mut scaled_check_poly = Polynomial::from_coefficients_vec(xi_s.compute_scaled_coeffs(chal));
+        // It's not necessary to use the full length of the ck if all the Bullet Polys are smaller:
+        // trim the ck if that's the case
+        key_len = combined_check_poly.coeffs.len();
+        assert_eq!(key_len.next_power_of_two(), key_len);
+        let mut comm_key = &ck.comm_key[..key_len];
 
-                // Combine i-th commitment with the i-th challenge
-                let mut commitment = g_fin.comm[0].mul(chal);
-
-                // Address segmentation
-                let p_len = scaled_check_poly.coeffs.len();
-                if p_len > key_len {
-                    // Poly segmentation
-                    let mut polynomial_lc = Polynomial::zero();
-                    for i in 0..p_len / key_len + if p_len % key_len != 0 { 1 } else { 0 } {
-                        let is = i * key_len;
-                        let poly_single = Polynomial::from_coefficients_slice(&scaled_check_poly.coeffs[i * key_len..core::cmp::min((i + 1) * key_len, p_len)]);
-                        polynomial_lc += (point.pow(&[is as u64]), &poly_single);
-                    }
-                    scaled_check_poly = polynomial_lc;
-
-                    // Commitment segmentation
-                    let mut comm_lc = <G::Projective as ProjectiveCurve>::zero();
-                    for (i, comm_single) in g_fin.comm.iter().enumerate() {
-                        let is = i * key_len;
-                        comm_lc += &comm_single.mul(point.pow(&[is as u64]));
-                    }
-                    commitment = comm_lc.mul(&chal);
-                }
-                (scaled_check_poly, commitment)
-            }).reduce(|| (Polynomial::zero(), <G::Projective as ProjectiveCurve>::zero()), |acc, poly_comm| (&acc.0 + &poly_comm.0, acc.1 + &poly_comm.1));
-
-        let combined_v: G::ScalarField = values.into_par_iter().sum();
         end_timer!(batch_time);
 
         let proof_time =
@@ -170,14 +155,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
         let h_prime = ck.h.mul(round_challenge).into_affine();
 
-        // Pads the coefficients with zeroes to get the number of coeff to be d+1
-        let mut coeffs = combined_check_poly.coeffs;
-        if coeffs.len() < key_len {
-            for _ in coeffs.len()..key_len {
-                coeffs.push(G::ScalarField::zero());
-            }
-        }
-        let mut coeffs = coeffs.as_mut_slice();
+        let mut coeffs = combined_check_poly.coeffs.as_mut_slice();
 
         // Powers of z
         let mut z: Vec<G::ScalarField> = Vec::with_capacity(key_len);
@@ -189,15 +167,12 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let mut z = z.as_mut_slice();
 
         // This will be used for transforming the key in each step
-        let mut key_proj: Vec<G::Projective> = ck.comm_key.iter().map(|x| (*x).into_projective()).collect();
+        let mut key_proj: Vec<G::Projective> = comm_key.iter().map(|x| (*x).into_projective()).collect();
         let mut key_proj = key_proj.as_mut_slice();
 
         let mut temp;
 
-        // Key for MSM
-        // We initialize this to capacity 0 initially because we want to use the key slice first
-        let mut comm_key = &ck.comm_key;
-
+        let log_key_len = algebra::log2(key_len) as usize;
         let mut l_vec = Vec::with_capacity(log_key_len);
         let mut r_vec = Vec::with_capacity(log_key_len);
 
@@ -1174,7 +1149,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             temp = G::Projective::batch_normalization_into_affine(key_proj.to_vec());
             comm_key = &temp;
 
-            n /= 2; //TODO: Check somewhere that comm key size is a power of 2
+            n /= 2;
         }
 
         end_timer!(proof_time);
