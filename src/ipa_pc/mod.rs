@@ -360,11 +360,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
         if !ProjectiveCurve::is_zero(&(round_commitment_proj - &check_commitment_elem)) {
             end_timer!(check_time);
-            if cfg!(feature = "bench") {
-                return Ok(Some(check_poly))
-            } else {
-                return Ok(None)
-            }
+            return Ok(None)
         }
 
         end_timer!(check_time);
@@ -1412,97 +1408,6 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         Ok(true)
     }
 
-    /// Batch verification of multiple Self::BatchProof(s)
-    fn batch_check_batch_proofs<'a, R: RngCore>(
-        vk: &Self::VerifierKey,
-        commitments: impl IntoIterator<Item = &'a [LabeledCommitment<Self::Commitment>]>,
-        query_sets: impl IntoIterator<Item = &'a QuerySet<'a, G::ScalarField>>,
-        values: impl IntoIterator<Item = &'a Evaluations<'a, G::ScalarField>>,
-        proofs: impl IntoIterator<Item = &'a Self::BatchProof>,
-        opening_challenges: impl IntoIterator<Item = G::ScalarField>,
-        rng: &mut R,
-    ) -> Result<bool, Self::Error>
-        where
-            Self::Commitment: 'a,
-            Self::BatchProof: 'a,
-    {
-        let comms = commitments.into_iter().collect::<Vec<_>>();
-        let query_sets = query_sets.into_iter().collect::<Vec<_>>();
-        let values = values.into_iter().collect::<Vec<_>>();
-        let proofs = proofs.into_iter().collect::<Vec<_>>();
-        let opening_challenges = opening_challenges.into_iter().collect::<Vec<_>>();
-
-        let succinct_time = start_timer!(|| format!("Succinct verification of proofs"));
-
-        let xi_s_and_final_comm_keys = comms.into_par_iter()
-            .zip(query_sets)
-            .zip(values)
-            .zip(proofs)
-            .zip(opening_challenges)
-            .map(|((((commitments, query_set), values), proof), opening_challenge)|
-                {
-                    // Perform succinct check of i-th proof
-                    let opening_challenge_f = |pow| opening_challenge.pow(&[pow]);
-                    let (challenges, final_comm_key) = Self::succinct_batch_check_individual_opening_challenges(
-                        vk,
-                        commitments,
-                        query_set,
-                        values,
-                        proof,
-                        &opening_challenge_f,
-                    ).unwrap();
-
-                    (challenges, final_comm_key)
-                }
-            ).collect::<Vec<_>>();
-
-        let final_comm_keys = xi_s_and_final_comm_keys.iter().map(|(_, key)| key.clone()).collect::<Vec<_>>();
-        let xi_s_vec = xi_s_and_final_comm_keys.into_iter().map(|(chal, _)| chal).collect::<Vec<_>>();
-
-        end_timer!(succinct_time);
-
-        let batching_time = start_timer!(|| "Combine check polynomials and final comm keys");
-
-        // Sample batching challenge
-        let random_scalar = G::ScalarField::rand(rng);
-        let mut batching_chal = G::ScalarField::one();
-
-        // Collect the powers of the batching challenge in a vector
-        let mut batching_chal_pows = vec![G::ScalarField::zero(); xi_s_vec.len()];
-        for i in 0..batching_chal_pows.len() {
-            batching_chal_pows[i] = batching_chal;
-            batching_chal *= &random_scalar;
-        }
-
-        // Compute the combined_check_poly
-        let combined_check_poly = batching_chal_pows
-            .par_iter()
-            .zip(xi_s_vec)
-            .map(|(&chal, xi_s)| {
-                Polynomial::from_coefficients_vec(xi_s.compute_scaled_coeffs(-chal))
-            }).reduce(|| Polynomial::zero(), |acc, scaled_poly| &acc + &scaled_poly);
-        end_timer!(batching_time);
-
-        // DLOG hard part.
-        // The equation to check would be:
-        // lambda_1 * gfin_1 + ... + lambda_n * gfin_n - combined_h_1 * g_vk_1 - ... - combined_h_m * g_vk_m = 0
-        // Where combined_h_i = lambda_1 * h_1_i + ... + lambda_n * h_n_i
-        // We do final verification and the batching of the GFin in a single MSM
-        let hard_time = start_timer!(|| "Batch verify hard parts");
-        let final_val = Self::cm_commit(
-            &[final_comm_keys.as_slice(), vk.comm_key.as_slice()].concat(),
-            &[batching_chal_pows.as_slice(), combined_check_poly.coeffs.as_slice()].concat(),
-            None,
-            None,
-        );
-        if !ProjectiveCurve::is_zero(&final_val) {
-            end_timer!(hard_time);
-            return Ok(false);
-        }
-        end_timer!(hard_time);
-        Ok(true)
-    }
-
     fn open_combinations_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
         lc_s: impl IntoIterator<Item = &'a LinearCombination<G::ScalarField>>,
@@ -1774,13 +1679,6 @@ mod tests {
     fn segmented_test() {
         use crate::tests::*;
         segmented_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
-        println!("Finished tweedle_dee-blake2s");
-    }
-
-    #[test]
-    fn batch_check_batch_proofs_test() {
-        use crate::tests::*;
-        batch_check_batch_proofs_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
 
