@@ -1191,6 +1191,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let mut points = vec![];
 
         // h(X)
+        let h_poly_time = start_timer!(|| "Compute batching polynomial");
         let mut batch_polynomial = Polynomial::zero();
 
         for (label, (_point_label, point)) in query_set.iter() {
@@ -1220,11 +1221,13 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             cur_challenge = opening_challenges(opening_challenge_counter);
             opening_challenge_counter += 1;
         }
+        end_timer!(h_poly_time);
 
         let key_len = ck.comm_key.len();
         let p_len = batch_polynomial.coeffs.len();
 
         // Commitment of the h(X) polynomial
+        let commit_time = start_timer!(|| format!("Commit to batch polynomial of degree {}", batch_polynomial.degree()));
         let batch_commitment: Vec<G>;
 
         if p_len > key_len {
@@ -1251,7 +1254,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 ).into_affine()
             ];
         }
+        end_timer!(commit_time);
 
+        let open_time = start_timer!(|| "Open batch polynomial");
 
         // TODO: When we will move to Sponge-based construction, we will absorb the batch_commitment
         //       only and then squeeze a new challenge
@@ -1294,8 +1299,6 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let labeled_batch_rand = LabeledRandomness::new(format!("Batch"), batch_randomness);
         rands.push(&labeled_batch_rand);
 
-        end_timer!(batch_time);
-
         let opening_challenge = Self::compute_random_oracle_challenge(
             &to_bytes![
                 batch_values.values().collect::<Vec<&G::ScalarField>>(),
@@ -1315,6 +1318,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             rands,
             rng
         )?;
+        end_timer!(open_time);
+
+        end_timer!(batch_time);
 
         Ok(BatchProof {
             proof,
