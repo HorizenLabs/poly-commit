@@ -103,13 +103,13 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     type UniversalParams: PCUniversalParams;
     /// The committer key for the scheme; used to commit to a polynomial and then
     /// open the commitment to produce an evaluation proof.
-    type CommitterKey: PCCommitterKey;
+    type CommitterKey: PCCommitterKey + algebra::FromBytes + algebra::ToBytes;
     /// The verifier key for the scheme; used to check an evaluation proof.
-    type VerifierKey: PCVerifierKey;
+    type VerifierKey: PCVerifierKey + algebra::FromBytes + algebra::ToBytes;
     /// The prepared verifier key for the scheme; used to check an evaluation proof.
     type PreparedVerifierKey: PCPreparedVerifierKey<Self::VerifierKey> + Clone;
     /// The commitment to a polynomial.
-    type Commitment: PCCommitment + Default;
+    type Commitment: PCCommitment + Default + algebra::FromBytes + algebra::ToBytes;
     /// The prepared commitment to a polynomial.
     type PreparedCommitment: PCPreparedCommitment<Self::Commitment>;
     /// The commitment randomness.
@@ -1251,5 +1251,28 @@ pub mod tests {
             num_equations: Some(2),
         };
         equation_test_template::<F, PC>(info)
+    }
+
+    pub fn serialization_test<F>() -> Result<(), Error>
+    where
+        F: Field,
+    {
+        use algebra::{FromBytes, ToBytes};
+        let rng = &mut thread_rng();
+        for i in 0..100 {
+            let label = format!("Test{}", i);
+            let poly = Polynomial::<F>::rand(1 << 10, rng);
+            let l_poly = LabeledPolynomial::new(
+                label,
+                poly,
+                Some(2),
+                Some(2),
+            );
+            let mut buffer = vec![];
+            l_poly.write(&mut buffer).unwrap();
+            let l_poly_check = LabeledPolynomial::<F>::read(buffer.clone().as_slice()).unwrap();
+            assert_eq!(l_poly, l_poly_check);
+        }
+        Ok(())
     }
 }

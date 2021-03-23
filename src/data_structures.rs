@@ -66,7 +66,7 @@ pub trait PCPreparedCommitment<UNPREPARED: PCCommitment>: Clone {
 
 /// Defines the minimal interface of commitment randomness for any polynomial
 /// commitment scheme.
-pub trait PCRandomness: Clone {
+pub trait PCRandomness: Clone + algebra::ToBytes + algebra::FromBytes {
     /// Outputs empty randomness that does not hide the commitment.
     fn empty() -> Self;
 
@@ -87,7 +87,7 @@ pub trait PCProof: Clone + algebra::ToBytes {
 /// A polynomial along with information about its degree bound (if any), and the
 /// maximum number of queries that will be made to it. This latter number determines
 /// the amount of protection that will be provided to a commitment for this polynomial.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LabeledPolynomial<F: Field> {
     label: PolynomialLabel,
     polynomial: Rc<Polynomial<F>>,
@@ -150,6 +150,59 @@ impl<'a, F: Field> LabeledPolynomial<F> {
     }
 }
 
+impl<F: Field> algebra::ToBytes for LabeledPolynomial<F>  {
+    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
+        let v =self.label.as_bytes().to_vec();
+        (v.len() as u64).write(&mut writer)?;
+        v.write(&mut writer)?;
+        (*self.polynomial).write(&mut writer)?;
+        self.degree_bound.is_some().write(&mut writer)?;
+        (self.degree_bound.unwrap_or(0) as u64).write(&mut writer)?;
+        self.hiding_bound.is_some().write(&mut writer)?;
+        (self.hiding_bound.unwrap_or(0) as u64).write(&mut writer)?;
+        Ok(())
+    }
+}
+
+impl<F: Field> algebra::FromBytes for LabeledPolynomial<F> {
+    #[inline]
+    fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<LabeledPolynomial<F>> {
+        let count = u64::read(&mut reader)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))? as usize;
+        let mut buf = vec![0u8; count];
+        reader.read_exact(buf.as_mut())?;
+        let label = String::from_utf8(buf)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let polynomial = Polynomial::<F>::read(&mut reader)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let degree_bound_exists = bool::read(&mut reader)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let degree_bound_loaded = u64::read(&mut reader)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let degree_bound = if degree_bound_exists {
+            Some(degree_bound_loaded as usize)
+        } else {
+            None
+        };
+        let hiding_bound_exists = bool::read(&mut reader)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let hiding_bound_loaded = u64::read(&mut reader)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let hiding_bound = if hiding_bound_exists {
+            Some(hiding_bound_loaded as usize)
+        } else {
+            None
+        };
+
+        Ok(LabeledPolynomial::<F>{
+            label,
+            polynomial: Rc::new(polynomial),
+            degree_bound,
+            hiding_bound
+        })
+    }
+}
+
 /// A commitment along with information about its degree bound (if any).
 #[derive(Clone)]
 pub struct LabeledCommitment<C: PCCommitment> {
@@ -186,8 +239,9 @@ impl<C: PCCommitment> LabeledCommitment<C> {
 
 impl<C: PCCommitment> algebra::ToBytes for LabeledCommitment<C> {
     #[inline]
-    fn write<W: std::io::Write>(&self, writer: W) -> std::io::Result<()> {
-        self.commitment.write(writer)
+    fn write<W: std::io::Write>(&self, mut w: W) -> std::io::Result<()> {
+        self.commitment.write(&mut w)?;
+        Ok(())
     }
 }
 

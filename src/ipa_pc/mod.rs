@@ -1075,6 +1075,8 @@ mod tests {
 
     use super::InnerProductArgPC;
 
+    use algebra::fields::tweedle::Fr;
+
     use algebra::curves::tweedle::dee::{
         Affine, Projective,
     };
@@ -1173,6 +1175,13 @@ mod tests {
         use crate::tests::*;
         bad_degree_bound_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
+    }
+
+    #[test]
+    fn serialization_test() {
+        use crate::tests::*;
+        serialization_test::<Fr>().expect("test failed for tweedle_fr");
+        println!("Finished tweedle_fr");
     }
 
     #[test]
