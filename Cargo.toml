@@ -20,9 +20,9 @@ license = "MIT/Apache-2.0"
 edition = "2018"
 
 [dependencies]
-algebra = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "algebra_ocl", features = ["parallel"] }
-algebra-utils = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "algebra_ocl", features = [ "parallel", "fft" ] }
-bench-utils = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "algebra_ocl" }
+algebra = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "algebra_ocl_serializations", features = ["parallel"] }
+algebra-utils = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "algebra_ocl_serializations", features = [ "parallel", "fft" ] }
+bench-utils = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "algebra_ocl_serializations" }
 rand_core = { version = "0.5", default-features = false }
 digest = "0.8"
 rayon = { version = "1" }
@@ -33,7 +33,7 @@ algebra-kernels = {git = "https://github.com/HorizenOfficial/ginger-algebra-ocl"
 
 [dev-dependencies]
 rand = { version = "0.7", default-features = false }
-algebra = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "algebra_ocl", features = ["bls12_381", "jubjub", "bn_382", "bls12_377", "tweedle"] }
+algebra = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "algebra_ocl_serializations", features = ["bls12_381", "jubjub", "bn_382", "bls12_377", "tweedle"] }
 blake2 = { version = "0.8", default-features = false }
 
 [features]
@@ -70,3 +70,13 @@ lto = "thin"
 incremental = true
 debug-assertions = false
 debug = false
+
+# Uncomment these lines for local development paths
+
+#[patch.'https://github.com/HorizenOfficial/ginger-lib.git']
+#algebra = { path = '../ginger-lib/algebra' }
+#algebra-utils = { path = '../ginger-lib/algebra-utils' }
+#bench-utils = { path = '../ginger-lib/bench-utils' }
+
+#[patch.'https://github.com/HorizenOfficial/ginger-algebra-ocl']
+#algebra-kernels = { path = '../ginger-algebra-ocl/algebra-kernels' }
