@@ -626,7 +626,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             if p_len > key_len {
 
                 // split poly in segments and commit all of them without shifting
-                comm = (0..p_len / key_len + if p_len % key_len != 0 { 1 } else { 0 }).into_par_iter().map(
+                comm = (0..p_len / key_len + if p_len % key_len != 0 { 1 } else { 0 }).into_iter().map(
                     |i| {
                         Self::cm_commit(
                             &ck.comm_key,
@@ -1029,7 +1029,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         if p_len > key_len {
 
-            batch_commitment = (0..p_len / key_len + if p_len % key_len != 0 { 1 } else { 0 }).into_par_iter().map(
+            batch_commitment = (0..p_len / key_len + if p_len % key_len != 0 { 1 } else { 0 }).into_iter().map(
                 |i| {
                     Self::cm_commit(
                         &ck.comm_key,
@@ -1856,13 +1856,13 @@ mod tests {
         println!("Finished tweedle_dee-blake2s");
     }
 
-    // #[test]
-    // #[should_panic]
-    // fn bad_degree_bound_test() {
-    //     use crate::tests::*;
-    //     bad_degree_bound_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
-    //     println!("Finished tweedle_dee-blake2s");
-    // }
+    #[test]
+    #[should_panic]
+    fn bad_degree_bound_test() {
+        use crate::tests::*;
+        bad_degree_bound_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
+        println!("Finished tweedle_dee-blake2s");
+    }
 
     #[test]
     fn polycommit_round_reduce_test() {

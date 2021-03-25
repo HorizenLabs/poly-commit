@@ -226,7 +226,7 @@ pub struct LabeledCommitment<C: PCCommitment> {
 }
 
 impl<C: PCCommitment> LabeledCommitment<C> {
-    /// Instantiate a new polynomial_context.
+    /// Instantiate a new commitment_context.
     pub fn new(label: PolynomialLabel, commitment: C, degree_bound: Option<usize>) -> Self {
         Self {
             label,
@@ -259,7 +259,7 @@ impl<C: PCCommitment> algebra::ToBytes for LabeledCommitment<C> {
     }
 }
 
-/// A commitment along with information about its degree bound (if any).
+/// A labeled randomness.
 #[derive(Clone)]
 pub struct LabeledRandomness<R: PCRandomness> {
     label: PolynomialLabel,
@@ -267,7 +267,7 @@ pub struct LabeledRandomness<R: PCRandomness> {
 }
 
 impl<R: PCRandomness> LabeledRandomness<R> {
-    /// Instantiate a new polynomial_context.
+    /// Instantiate a new randomness_context.
     pub fn new(label: PolynomialLabel, randomness: R) -> Self {
         Self {
             label,
