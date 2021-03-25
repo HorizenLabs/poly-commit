@@ -131,16 +131,16 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
             let degree_bound = labeled_commitment.degree_bound();
 
-            let d = degree_bound.and_then(|d| {
-                if (d + 1) % n != 0 { Some(d + 1) } else { None }
+            let used_degree_bound = degree_bound.and_then(|used_degree_bound| {
+                if (used_degree_bound + 1) % n != 0 { Some(used_degree_bound + 1) } else { None }
             });
 
             assert_eq!(
-                d.is_some(),
+                used_degree_bound.is_some(),
                 commitment.shifted_comm.is_some()
             );
 
-            if d.is_some() {
+            if used_degree_bound.is_some() {
                 let shift = point.pow([(vk.supported_degree() - degree_bound.unwrap()) as u64]);
                 combined_v += &(cur_challenge * &value * &shift);
                 combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
@@ -344,24 +344,24 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         Ok((check_poly.unwrap(), proof.final_comm_key))
     }
 
-    fn check_degrees_and_bounds(
-        supported_degree: usize,
-        p: &LabeledPolynomial<G::ScalarField>,
-    ) -> Result<(), Error> {
-
-        if let Some(bound) = p.degree_bound() {
-            if bound < p.degree() || bound > supported_degree {
-                return Err(Error::IncorrectDegreeBound {
-                    poly_degree: p.degree(),
-                    degree_bound: bound,
-                    supported_degree,
-                    label: p.label().to_string(),
-                });
-            }
-        }
-
-        Ok(())
-    }
+    // fn check_degrees_and_bounds(
+    //     supported_degree: usize,
+    //     p: &LabeledPolynomial<G::ScalarField>,
+    // ) -> Result<(), Error> {
+    //
+    //     if let Some(bound) = p.degree_bound() {
+    //         if bound < p.degree() || bound > supported_degree {
+    //             return Err(Error::IncorrectDegreeBound {
+    //                 poly_degree: p.degree(),
+    //                 degree_bound: bound,
+    //                 supported_degree,
+    //                 label: p.label().to_string(),
+    //             });
+    //         }
+    //     }
+    //
+    //     Ok(())
+    // }
 
     fn shift_polynomial(
         ck: &CommitterKey<G>,
@@ -418,8 +418,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             let label = info.0.clone();
             let degree_bound = info.1;
 
-            if degree_bound.and_then(|d| {
-                if (d + 1) % n == 0 { None } else { Some(d + 1) }
+            if degree_bound.and_then(|used_degree_bound| {
+                if (used_degree_bound + 1) % n == 0 { None } else { Some(used_degree_bound + 1) }
             }).is_some() {
                 commitment = Commitment {
                     comm: vec![comms[i].clone()],
@@ -597,7 +597,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let commit_time = start_timer!(|| "Committing to polynomials");
         for labeled_polynomial in polynomials {
-            Self::check_degrees_and_bounds(ck.supported_degree(), labeled_polynomial)?;
+            // Self::check_degrees_and_bounds(ck.supported_degree(), labeled_polynomial)?;
 
             let polynomial = labeled_polynomial.polynomial();
             let label = labeled_polynomial.label();
@@ -651,10 +651,10 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             }
 
             // committing only last segment shifted to the right edge
-            let shifted_comm = degree_bound.and_then(|d| {
-                let d = d + 1; // Convert to the maximum number of coefficients
-                if d % key_len != 0 {
-                    let shifted_polynomial = Self::shift_polynomial(ck, &Polynomial::from_coefficients_slice(&polynomial.coeffs[d - (d % key_len)..p_len]), degree_bound.unwrap());
+            let shifted_comm = degree_bound.and_then(|used_degree_bound| {
+                let used_degree_bound = used_degree_bound + 1; // Convert to the maximum number of coefficients
+                if used_degree_bound % key_len != 0 {
+                    let shifted_polynomial = Self::shift_polynomial(ck, &Polynomial::from_coefficients_slice(&polynomial.coeffs[used_degree_bound - (used_degree_bound % key_len)..p_len]), degree_bound.unwrap());
                     Some(
                         Self::cm_commit(
                             &ck.comm_key,
@@ -718,7 +718,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         {
             let label = labeled_polynomial.label();
             assert_eq!(labeled_polynomial.label(), labeled_commitment.label());
-            Self::check_degrees_and_bounds(ck.supported_degree(), labeled_polynomial)?;
+            // Self::check_degrees_and_bounds(ck.supported_degree(), labeled_polynomial)?;
 
             let polynomial = labeled_polynomial.polynomial();
             let degree_bound = labeled_polynomial.degree_bound();
@@ -758,12 +758,12 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             cur_challenge = opening_challenges(opening_challenge_counter);
             opening_challenge_counter += 1;
 
-            let d = degree_bound.and_then(|d| {
-                if (d + 1) % key_len != 0 { Some(d + 1) } else { None }
+            let used_degree_bound = degree_bound.and_then(|used_degree_bound| {
+                if (used_degree_bound + 1) % key_len != 0 { Some(used_degree_bound + 1) } else { None }
             });
 
             assert_eq!(
-                d.is_some(),
+                used_degree_bound.is_some(),
                 commitment.shifted_comm.is_some(),
                 "shifted_comm mismatch for {}",
                 label
@@ -776,7 +776,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 label
             );
 
-            if let Some(d) = d {
+            if let Some(d) = used_degree_bound {
                 let shifted_polynomial = Self::shift_polynomial(ck, &Polynomial::from_coefficients_slice(&polynomial.coeffs[d - (d % key_len)..p_len]), degree_bound.unwrap());
                 combined_polynomial += (cur_challenge, &shifted_polynomial);
                 combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
