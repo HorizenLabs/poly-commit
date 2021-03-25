@@ -93,6 +93,27 @@ pub struct BatchLCProof<F: Field, PC: PolynomialCommitment<F>> {
     pub evals: Option<Vec<F>>,
 }
 
+impl<F: Field, PC: PolynomialCommitment<F>> algebra::ToBytes for BatchLCProof<F, PC> {
+    #[inline]
+    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
+        self.proof.write(&mut writer)?;
+        self.evals.write(&mut writer)?;
+        Ok(())
+    }
+}
+
+impl<F: Field, PC: PolynomialCommitment<F>> algebra::FromBytes for BatchLCProof<F, PC> {
+    #[inline]
+    fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<BatchLCProof<F, PC>> {
+        let proof = PC::BatchProof::read(&mut reader)?;
+        let evals = Option::<Vec<F>>::read(&mut reader)?;
+        Ok(BatchLCProof::<F, PC> {
+            proof,
+            evals
+        })
+    }
+}
+
 /// Describes the interface for a polynomial commitment scheme that allows
 /// a sender to commit to multiple polynomials and later provide a succinct proof
 /// of evaluation for the corresponding commitments at a query set `Q`, while
@@ -117,7 +138,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// The evaluation proof for a single point.
     type Proof: PCProof + Clone;
     /// The evaluation proof for a query set.
-    type BatchProof: Clone + From<Vec<Self::Proof>> + Into<Vec<Self::Proof>>;
+    type BatchProof: Clone + From<Vec<Self::Proof>> + Into<Vec<Self::Proof>> + algebra::ToBytes + algebra::FromBytes;
     /// The error type for the scheme.
     type Error: std::error::Error + From<Error>;
 

@@ -60,10 +60,7 @@ impl<G: AffineCurve> PCCommitterKey for CommitterKey<G> {
 
 impl<G: AffineCurve> ToBytes for CommitterKey<G> {
     fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        (self.comm_key.len() as u64).write(&mut writer)?;
-        for g in self.comm_key.iter() {
-            g.write(&mut writer)?;
-        }
+        self.comm_key.write(&mut writer)?;
         self.h.write(&mut writer)?;
         self.s.write(&mut writer)?;
         (self.max_degree as u8).write(&mut writer)
@@ -73,21 +70,10 @@ impl<G: AffineCurve> ToBytes for CommitterKey<G> {
 impl<G: AffineCurve> FromBytes for CommitterKey<G> {
     #[inline]
     fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<CommitterKey<G>> {
-        let g_count = u64::read(&mut reader)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let mut comm_key = vec![];
-        for _ in 0..g_count {
-            let g = G::read(&mut reader)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-            comm_key.push(g);
-        }
-        let h = G::read(&mut reader)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let s = G::read(&mut reader)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let max_degree = u8::read(&mut reader)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))? as usize;
-
+        let comm_key = Vec::<G>::read(&mut reader)?;
+        let h = G::read(&mut reader)?;
+        let s = G::read(&mut reader)?;
+        let max_degree = u8::read(&mut reader)? as usize;
         Ok(CommitterKey::<G>{
             comm_key,
             h,
@@ -163,29 +149,16 @@ impl<G: AffineCurve> ToBytes for Commitment<G> {
     #[inline]
     fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
         self.comm.write(&mut writer)?;
-        let shifted_exists = self.shifted_comm.is_some();
-        shifted_exists.write(&mut writer)?;
-        self.shifted_comm
-            .as_ref()
-            .unwrap_or(&G::zero())
-            .write(&mut writer)
+        self.shifted_comm.write(&mut writer)?;
+        Ok(())
     }
 }
 
 impl<G: AffineCurve> FromBytes for Commitment<G> {
     #[inline]
     fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<Commitment<G>> {
-        let comm = G::read(&mut reader)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let shifted_exists = bool::read(&mut reader)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let shifted_comm_loaded = G::read(&mut reader)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let shifted_comm = if shifted_exists {
-            Some(shifted_comm_loaded)
-        } else {
-            None
-        };
+        let comm = G::read(&mut reader)?;
+        let shifted_comm = Option::<G>::read(&mut reader)?;
         Ok(Commitment::<G>{
             comm,
             shifted_comm
@@ -246,12 +219,7 @@ impl<G: AffineCurve> ToBytes for Randomness<G>
     #[inline]
     fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
         self.rand.write(&mut writer)?;
-        let shifted_exists = self.shifted_rand.is_some();
-        shifted_exists.write(&mut writer)?;
-        self.shifted_rand
-            .as_ref()
-            .unwrap_or(&G::ScalarField::zero())
-            .write(&mut writer)?;
+        self.shifted_rand.write(&mut writer)?;
         Ok(())
     }
 }
@@ -260,17 +228,8 @@ impl<G: AffineCurve> FromBytes for Randomness<G>
 {
     #[inline]
     fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<Randomness<G>> {
-        let rand = G::ScalarField::read(&mut reader)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let shifted_exists = bool::read(&mut reader)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let shifted_rand_loaded = G::ScalarField::read(&mut reader)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let shifted_rand = if shifted_exists {
-            Some(shifted_rand_loaded)
-        } else {
-            None
-        };
+        let rand = G::ScalarField::read(&mut reader)?;
+        let shifted_rand = Option::<G::ScalarField>::read(&mut reader)?;
         Ok(Randomness::<G>{
             rand,
             shifted_rand
@@ -321,17 +280,30 @@ impl<G: AffineCurve> ToBytes for Proof<G> {
         self.r_vec.write(&mut writer)?;
         self.final_comm_key.write(&mut writer)?;
         self.c.write(&mut writer)?;
-        self.hiding_comm
-            .as_ref()
-            .unwrap_or(&G::zero())
-            .write(&mut writer)?;
-        self.rand
-            .as_ref()
-            .unwrap_or(&G::ScalarField::zero())
-            .write(&mut writer)
+        self.hiding_comm.write(&mut writer)?;
+        self.rand.write(&mut writer)
     }
 }
 
+impl<G: AffineCurve> FromBytes for Proof<G> {
+    #[inline]
+    fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<Proof<G>> {
+        let l_vec = Vec::<G>::read(&mut reader)?;
+        let r_vec = Vec::<G>::read(&mut reader)?;
+        let final_comm_key = G::read(&mut reader)?;
+        let c = G::ScalarField::read(&mut reader)?;
+        let hiding_comm = Option::<G>::read(&mut reader)?;
+        let rand = Option::<G::ScalarField>::read(&mut reader)?;
+        Ok(Proof::<G>{
+            l_vec,
+            r_vec,
+            final_comm_key,
+            c,
+            hiding_comm,
+            rand
+        })
+    }
+}
 /// `SuccinctCheckPolynomial` is a succinctly-representated polynomial
 /// generated from the `log_d` random oracle challenges generated in `open`.
 /// It has the special property that can be evaluated in `O(log_d)` time.

@@ -79,7 +79,7 @@ pub trait PCRandomness: Clone + algebra::ToBytes + algebra::FromBytes {
 
 /// Defines the minimal interface of evaluation proofs for any polynomial
 /// commitment scheme.
-pub trait PCProof: Clone + algebra::ToBytes {
+pub trait PCProof: Clone + algebra::ToBytes + algebra::FromBytes {
     /// Size in bytes
     fn size_in_bytes(&self) -> usize;
 }
@@ -152,14 +152,10 @@ impl<'a, F: Field> LabeledPolynomial<F> {
 
 impl<F: Field> algebra::ToBytes for LabeledPolynomial<F>  {
     fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        let v =self.label.as_bytes().to_vec();
-        (v.len() as u64).write(&mut writer)?;
-        v.write(&mut writer)?;
+        self.label.as_bytes().to_vec().write(&mut writer)?;
         (*self.polynomial).write(&mut writer)?;
-        self.degree_bound.is_some().write(&mut writer)?;
-        (self.degree_bound.unwrap_or(0) as u64).write(&mut writer)?;
-        self.hiding_bound.is_some().write(&mut writer)?;
-        (self.hiding_bound.unwrap_or(0) as u64).write(&mut writer)?;
+        self.degree_bound.write(&mut writer)?;
+        self.hiding_bound.write(&mut writer)?;
         Ok(())
     }
 }
@@ -167,33 +163,11 @@ impl<F: Field> algebra::ToBytes for LabeledPolynomial<F>  {
 impl<F: Field> algebra::FromBytes for LabeledPolynomial<F> {
     #[inline]
     fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<LabeledPolynomial<F>> {
-        let count = u64::read(&mut reader)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))? as usize;
-        let mut buf = vec![0u8; count];
-        reader.read_exact(buf.as_mut())?;
-        let label = String::from_utf8(buf)
+        let label = String::from_utf8(Vec::<u8>::read(&mut reader)?)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let polynomial = Polynomial::<F>::read(&mut reader)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let degree_bound_exists = bool::read(&mut reader)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let degree_bound_loaded = u64::read(&mut reader)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let degree_bound = if degree_bound_exists {
-            Some(degree_bound_loaded as usize)
-        } else {
-            None
-        };
-        let hiding_bound_exists = bool::read(&mut reader)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let hiding_bound_loaded = u64::read(&mut reader)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let hiding_bound = if hiding_bound_exists {
-            Some(hiding_bound_loaded as usize)
-        } else {
-            None
-        };
-
+        let polynomial = Polynomial::<F>::read(&mut reader)?;
+        let degree_bound = Option::<usize>::read(&mut reader)?;
+        let hiding_bound = Option::<usize>::read(&mut reader)?;
         Ok(LabeledPolynomial::<F>{
             label,
             polynomial: Rc::new(polynomial),
