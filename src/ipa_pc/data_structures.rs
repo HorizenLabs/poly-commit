@@ -225,7 +225,7 @@ Eq(bound = "")
 )]
 pub struct Randomness<G: AffineCurve> {
     /// Randomness is some scalar field element.
-    pub rand: G::ScalarField,
+    pub rand: Vec<G::ScalarField>,
 
     /// Randomness applied to the shifted commitment is some scalar field element.
     pub shifted_rand: Option<G::ScalarField>,
@@ -234,13 +234,13 @@ pub struct Randomness<G: AffineCurve> {
 impl<G: AffineCurve> PCRandomness for Randomness<G> {
     fn empty() -> Self {
         Self {
-            rand: G::ScalarField::zero(),
+            rand: vec![G::ScalarField::zero()],
             shifted_rand: None,
         }
     }
 
-    fn rand<R: RngCore>(_num_queries: usize, has_degree_bound: bool, rng: &mut R) -> Self {
-        let rand = G::ScalarField::rand(rng);
+    fn rand<R: RngCore>(segments_count: usize, has_degree_bound: bool, rng: &mut R) -> Self {
+        let rand = (0..segments_count).map(|_| G::ScalarField::rand(rng)).collect::<Vec<_>>();
         let shifted_rand = if has_degree_bound {
             Some(G::ScalarField::rand(rng))
         } else {
@@ -255,7 +255,10 @@ impl<G: AffineCurve> ToBytes for Randomness<G>
 {
     #[inline]
     fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        self.rand.write(&mut writer)?;
+        (self.rand.len() as u64).write(&mut writer)?;
+        for r in self.rand.iter() {
+            r.write(&mut writer)?;
+        }
         let shifted_exists = self.shifted_rand.is_some();
         shifted_exists.write(&mut writer)?;
         self.shifted_rand
@@ -270,8 +273,14 @@ impl<G: AffineCurve> FromBytes for Randomness<G>
 {
     #[inline]
     fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<Randomness<G>> {
-        let rand = G::ScalarField::read(&mut reader)
+        let r_count = u64::read(&mut reader)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let mut rand = vec![];
+        for _ in 0..r_count {
+            let r = G::ScalarField::read(&mut reader)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            rand.push(r);
+        }
         let shifted_exists = bool::read(&mut reader)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let shifted_rand_loaded = G::ScalarField::read(&mut reader)
