@@ -91,17 +91,6 @@ pub trait BatchPCProof: Clone + algebra::ToBytes {
     fn size_in_bytes(&self) -> usize;
 }
 
-
-/// General accumulator structure for a public aggregation scheme.
-pub trait PCAccumulator: Clone + algebra::ToBytes {
-
-    /// Commitment of a Public Polynomial
-    type Commitment: PCCommitment;
-
-    /// A succinct description of the public polynomial
-    type SuccinctDescription;
-}
-
 /// A polynomial along with information about its degree bound (if any), and the
 /// maximum number of queries that will be made to it. This latter number determines
 /// the amount of protection that will be provided to a commitment for this polynomial.

@@ -376,41 +376,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         where
             Self::Commitment: 'a;
 
-    /// Batch check batch proofs
-    fn batch_check_batch_proofs<'a, R: RngCore>(
-        vk: &Self::VerifierKey,
-        commitments: impl IntoIterator<Item = &'a [LabeledCommitment<Self::Commitment>]>,
-        query_sets: impl IntoIterator<Item = &'a QuerySet<'a, F>>,
-        values: impl IntoIterator<Item = &'a Evaluations<'a, F>>,
-        proofs: impl IntoIterator<Item = &'a Self::BatchProof>,
-        opening_challenges: impl IntoIterator<Item = F>,
-        rng: &mut R,
-    ) -> Result<bool, Self::Error>
-        where
-            Self::Commitment: 'a,
-            Self::BatchProof: 'a,
-    {
-        let mut result = true;
-        for ((((comms, query_set), values), proof), opening_challenge) in commitments.into_iter()
-            .zip(query_sets.into_iter())
-            .zip(values.into_iter())
-            .zip(proofs.into_iter())
-            .zip(opening_challenges.into_iter())
-        {
-            let opening_challenge_f = |pow| opening_challenge.pow(&[pow]);
-            result &= Self::batch_check_individual_opening_challenges(
-                vk,
-                comms,
-                query_set,
-                values,
-                proof,
-                &opening_challenge_f,
-                rng
-            )?;
-        }
-        Ok(result)
-    }
-
     /// open_combinations but with individual challenges
     fn open_combinations_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
@@ -519,44 +484,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     }
 }
 
-/// Generic interface of a public aggregation scheme as defined in ...
-/// TODO: Add literature
-pub trait PublicAccumulationScheme<F: Field, A: PCAccumulator>: PolynomialCommitment<F> {
-
-    /// Succinct verify proofs and, if valid, return their accumulators.
-    fn succinct_verify<'a, R: RngCore>(
-        vk: &Self::VerifierKey,
-        commitments: impl IntoIterator<Item = &'a [LabeledCommitment<Self::Commitment>]>,
-        query_sets: impl IntoIterator<Item = &'a QuerySet<'a, F>>,
-        values: impl IntoIterator<Item = &'a Evaluations<'a, F>>,
-        proofs: impl IntoIterator<Item = &'a Self::BatchProof>,
-        opening_challenges: impl IntoIterator<Item = F>,
-        rng: &mut R,
-    ) -> Result<Vec<A>, Self::Error>
-        where
-            Self::Commitment: 'a,
-            Self::BatchProof: 'a;
-
-    /// Amortization strategy for A as a separate protocol.
-    /// Return a separate non-interactive proof.
-    fn accumulate<'a, R: RngCore>(
-        vk: &Self::VerifierKey,
-        vk_hash: Vec<u8>,
-        accumulators: Vec<A>,
-        rng: &mut R,
-    ) -> Result<Self::Proof, Self::Error>;
-
-    /// Verifies a proof produced by accumulators.
-    /// This includes also the non-succinct check to be done.
-    fn verify_accumulation<R: RngCore>(
-        vk: &Self::VerifierKey,
-        vk_hash: Vec<u8>,
-        accumulators: Vec<A>,
-        proof: Self::Proof,
-        rng: &mut R,
-    ) -> Result<bool, Self::Error>;
-}
-
 /// Evaluate the given polynomials at `query_set`.
 pub fn evaluate_query_set<'a, F: Field>(
     polys: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
@@ -618,10 +545,9 @@ fn lc_query_set_to_poly_query_set<'a, F: 'a + Field>(
 #[cfg(test)]
 pub mod tests {
     use crate::*;
-    use algebra::{Field, ToBytes, to_bytes};
+    use algebra::Field;
     use rand::{distributions::Distribution, Rng, thread_rng};
     use std::marker::PhantomData;
-    use digest::Digest;
 
     #[derive(Copy, Clone, Default)]
     struct TestInfo {
@@ -1279,149 +1205,6 @@ pub mod tests {
             ..Default::default()
         };
         test_template::<F, PC>(info)
-    }
-
-    pub fn batch_check_batch_proofs_test<F, PC>() -> Result<(), PC::Error>
-        where
-            F: Field,
-            PC: PolynomialCommitment<F>,
-    {
-        let rng = &mut thread_rng();
-        let max_degree = rand::distributions::Uniform::from(2..=64).sample(rng);
-
-        let info = TestInfo {
-            num_iters: 1,
-            max_degree: Some(max_degree),
-            supported_degree: None,
-            num_polynomials: 10,
-            enforce_degree_bounds: true,
-            max_num_queries: 5,
-            ..Default::default()
-        };
-
-        let pp = PC::setup(max_degree, rng)?;
-
-        for num_proofs in 1..10 {
-            // Generate all proofs and the data needed by the verifier to verify them
-            let verifier_data_vec = vec![get_data_for_verifier::<F, PC>(info, Some(pp.clone())).unwrap(); num_proofs];
-
-            let vk = &verifier_data_vec[0].vk;
-
-            let mut comms = Vec::new();
-            let mut query_sets = Vec::new();
-            let mut evals = Vec::new();
-            let mut proofs = Vec::new();
-            let mut opening_challenges = Vec::new();
-
-            verifier_data_vec.iter().for_each(|verifier_data| {
-                assert_eq!(&verifier_data.vk, vk); // Vk should be equal for all proofs
-                comms.push(verifier_data.comms.as_slice());
-                query_sets.push(&verifier_data.query_set);
-                evals.push(&verifier_data.values);
-                proofs.push(&verifier_data.proof);
-                opening_challenges.push(verifier_data.opening_challenge.clone());
-            });
-
-            assert!(PC::batch_check_batch_proofs(
-                vk,
-                comms,
-                query_sets,
-                evals,
-                proofs,
-                opening_challenges,
-                rng
-            )?)
-        }
-
-        Ok(())
-    }
-
-    pub fn accumulation_test<F, A, PC, D>() -> Result<(), PC::Error>
-        where
-            F: Field,
-            A: PCAccumulator,
-            PC: PublicAccumulationScheme<F, A>,
-            D: Digest,
-    {
-        let rng = &mut thread_rng();
-        let max_degree = rand::distributions::Uniform::from(2..=64).sample(rng);
-
-        let info = TestInfo {
-            num_iters: 1,
-            max_degree: Some(max_degree),
-            supported_degree: None,
-            num_polynomials: 10,
-            enforce_degree_bounds: true,
-            max_num_queries: 5,
-            ..Default::default()
-        };
-
-        let pp = PC::setup(max_degree, rng)?;
-
-        for num_proofs in 1..10 {
-            // Generate all proofs and the data needed by the verifier to verify them
-            let verifier_data_vec = vec![get_data_for_verifier::<F, PC>(info, Some(pp.clone())).unwrap(); num_proofs];
-
-            let vk = &verifier_data_vec[0].vk;
-            let vk_hash = D::digest(&to_bytes!(vk).unwrap()).to_vec();
-
-            let mut comms = Vec::new();
-            let mut query_sets = Vec::new();
-            let mut evals = Vec::new();
-            let mut proofs = Vec::new();
-            let mut opening_challenges = Vec::new();
-
-            verifier_data_vec.iter().for_each(|verifier_data| {
-                assert_eq!(&verifier_data.vk, vk); // Vk should be equal for all proofs
-                comms.push(verifier_data.comms.as_slice());
-                query_sets.push(&verifier_data.query_set);
-                evals.push(&verifier_data.values);
-                proofs.push(&verifier_data.proof);
-                opening_challenges.push(verifier_data.opening_challenge.clone());
-            });
-
-            // Prover side
-            let accumulators = PC::succinct_verify(
-                vk,
-                comms.clone(),
-                query_sets.clone(),
-                evals.clone(),
-                proofs.clone(),
-                opening_challenges.clone(),
-                rng
-            )?;
-
-            let proof = PC::accumulate(
-                vk,
-                vk_hash.clone(),
-                accumulators,
-                rng
-            )?;
-
-            // Verifier side
-            let accumulators = PC::succinct_verify(
-                vk,
-                comms.clone(),
-                query_sets.clone(),
-                evals.clone(),
-                proofs.clone(),
-                opening_challenges.clone(),
-                rng
-            )?;
-
-            assert!(
-                PC::verify_accumulation(
-                    vk,
-                    vk_hash,
-                    accumulators,
-                    proof,
-                    rng
-                )?
-            );
-
-        }
-
-        Ok(())
     }
 
     pub fn full_end_to_end_equation_test<F, PC>() -> Result<(), PC::Error>
