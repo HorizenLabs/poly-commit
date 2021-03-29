@@ -647,8 +647,7 @@ pub mod tests {
             let degree_bound = if let Some(degree_bounds) = &mut degree_bounds {
                 let degree_bound;
                 if segmented {
-                    let range = rand::distributions::Uniform::from(degree..=(supported_degree * seg_mul));
-                    degree_bound = range.sample(rng);
+                    degree_bound = degree;
                 } else {
                     let range = rand::distributions::Uniform::from(degree..=supported_degree);
                     degree_bound = range.sample(rng);
@@ -1199,7 +1198,7 @@ pub mod tests {
             max_degree: None,
             supported_degree: None,
             num_polynomials: 10,
-            enforce_degree_bounds: false,
+            enforce_degree_bounds: true,
             max_num_queries: 5,
             segmented: true,
             ..Default::default()

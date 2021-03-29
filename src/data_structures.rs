@@ -68,7 +68,7 @@ pub trait PCPreparedCommitment<UNPREPARED: PCCommitment>: Clone {
 /// commitment scheme.
 pub trait PCRandomness: Clone + algebra::ToBytes + algebra::FromBytes {
     /// Outputs empty randomness that does not hide the commitment.
-    fn empty() -> Self;
+    fn empty(segments_count: usize) -> Self;
 
     /// Samples randomness for commitments;
     /// `num_queries` specifies the number of queries that the commitment will be opened at.

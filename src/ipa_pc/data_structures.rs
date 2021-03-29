@@ -232,9 +232,9 @@ pub struct Randomness<G: AffineCurve> {
 }
 
 impl<G: AffineCurve> PCRandomness for Randomness<G> {
-    fn empty() -> Self {
+    fn empty(segments_count: usize) -> Self {
         Self {
-            rand: vec![G::ScalarField::zero()],
+            rand: vec![G::ScalarField::zero(); segments_count],
             shifted_rand: None,
         }
     }
