@@ -60,7 +60,10 @@ impl<G: AffineCurve> PCCommitterKey for CommitterKey<G> {
 
 impl<G: AffineCurve> ToBytes for CommitterKey<G> {
     fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        self.comm_key.write(&mut writer)?;
+        (self.comm_key.len() as u32).write(&mut writer)?;
+        for item in self.comm_key.iter() {
+            item.write(&mut writer)?;
+        }
         self.h.write(&mut writer)?;
         self.s.write(&mut writer)?;
         (self.max_degree as u8).write(&mut writer)
@@ -70,7 +73,11 @@ impl<G: AffineCurve> ToBytes for CommitterKey<G> {
 impl<G: AffineCurve> FromBytes for CommitterKey<G> {
     #[inline]
     fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<CommitterKey<G>> {
-        let comm_key = Vec::<G>::read(&mut reader)?;
+        let count = u32::read(&mut reader)?;
+        let mut comm_key = vec![];
+        for _ in 0..count {
+            comm_key.push(G::read(&mut reader)?);
+        }
         let h = G::read(&mut reader)?;
         let s = G::read(&mut reader)?;
         let max_degree = u8::read(&mut reader)? as usize;
@@ -276,8 +283,14 @@ impl<G: AffineCurve> PCProof for Proof<G> {
 impl<G: AffineCurve> ToBytes for Proof<G> {
     #[inline]
     fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        self.l_vec.write(&mut writer)?;
-        self.r_vec.write(&mut writer)?;
+        (self.l_vec.len() as u32).write(&mut writer)?;
+        for item in self.l_vec.iter() {
+            item.write(&mut writer)?;
+        }
+        (self.r_vec.len() as u32).write(&mut writer)?;
+        for item in self.r_vec.iter() {
+            item.write(&mut writer)?;
+        }
         self.final_comm_key.write(&mut writer)?;
         self.c.write(&mut writer)?;
         self.hiding_comm.write(&mut writer)?;
@@ -288,8 +301,16 @@ impl<G: AffineCurve> ToBytes for Proof<G> {
 impl<G: AffineCurve> FromBytes for Proof<G> {
     #[inline]
     fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<Proof<G>> {
-        let l_vec = Vec::<G>::read(&mut reader)?;
-        let r_vec = Vec::<G>::read(&mut reader)?;
+        let mut l_vec = vec![];
+        let count = u32::read(&mut reader)? as usize;
+        for _ in 0..count {
+            l_vec.push(G::read(&mut reader)?);
+        }
+        let mut r_vec = vec![];
+        let count = u32::read(&mut reader)? as usize;
+        for _ in 0..count {
+            r_vec.push(G::read(&mut reader)?);
+        }
         let final_comm_key = G::read(&mut reader)?;
         let c = G::ScalarField::read(&mut reader)?;
         let hiding_comm = Option::<G>::read(&mut reader)?;

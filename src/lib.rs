@@ -96,8 +96,17 @@ pub struct BatchLCProof<F: Field, PC: PolynomialCommitment<F>> {
 impl<F: Field, PC: PolynomialCommitment<F>> algebra::ToBytes for BatchLCProof<F, PC> {
     #[inline]
     fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        self.proof.write(&mut writer)?;
-        self.evals.write(&mut writer)?;
+        let buf = self.proof.clone().into();
+        (buf.len() as u32).write(&mut writer)?;
+        for item in buf.iter() {
+            item.write(&mut writer)?;
+        }
+        self.evals.as_ref().and_then(|v| Some(v.len() as u32)).write(&mut writer)?;
+        if let Some(evals) = &self.evals {
+            for item in evals {
+                item.write(&mut writer)?;
+            }
+        }
         Ok(())
     }
 }
@@ -105,8 +114,22 @@ impl<F: Field, PC: PolynomialCommitment<F>> algebra::ToBytes for BatchLCProof<F,
 impl<F: Field, PC: PolynomialCommitment<F>> algebra::FromBytes for BatchLCProof<F, PC> {
     #[inline]
     fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<BatchLCProof<F, PC>> {
-        let proof = PC::BatchProof::read(&mut reader)?;
-        let evals = Option::<Vec<F>>::read(&mut reader)?;
+        let count = u32::read(&mut reader)? as usize;
+        let mut res = vec![];
+        for _ in 0..count {
+            res.push(PC::Proof::read(&mut reader)?);
+        }
+        let proof = PC::BatchProof::from(res);
+        let count = Option::<u32>::read(&mut reader)?;
+        let evals = if let Some(count) = count {
+            let mut res = vec![];
+            for _ in 0..count as usize {
+                res.push(F::read(&mut reader).unwrap());
+            }
+            Some(res)
+        } else {
+            None
+        };
         Ok(BatchLCProof::<F, PC> {
             proof,
             evals
@@ -138,7 +161,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// The evaluation proof for a single point.
     type Proof: PCProof + Clone;
     /// The evaluation proof for a query set.
-    type BatchProof: Clone + From<Vec<Self::Proof>> + Into<Vec<Self::Proof>> + algebra::ToBytes + algebra::FromBytes;
+    type BatchProof: Clone + From<Vec<Self::Proof>> + Into<Vec<Self::Proof>>;
     /// The error type for the scheme.
     type Error: std::error::Error + From<Error>;
 

@@ -152,10 +152,14 @@ impl<'a, F: Field> LabeledPolynomial<F> {
 
 impl<F: Field> algebra::ToBytes for LabeledPolynomial<F>  {
     fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        self.label.as_bytes().to_vec().write(&mut writer)?;
+        let buf = self.label.as_bytes().to_vec();
+        (buf.len() as u8).write(&mut writer)?;
+        for item in buf.iter() {
+            item.write(&mut writer)?;
+        }
         (*self.polynomial).write(&mut writer)?;
-        self.degree_bound.write(&mut writer)?;
-        self.hiding_bound.write(&mut writer)?;
+        self.degree_bound.and_then(|v| Some(v as u32)).write(&mut writer)?;
+        self.hiding_bound.and_then(|v| Some(v as u32)).write(&mut writer)?;
         Ok(())
     }
 }
@@ -163,11 +167,16 @@ impl<F: Field> algebra::ToBytes for LabeledPolynomial<F>  {
 impl<F: Field> algebra::FromBytes for LabeledPolynomial<F> {
     #[inline]
     fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<LabeledPolynomial<F>> {
-        let label = String::from_utf8(Vec::<u8>::read(&mut reader)?)
+        let mut buf = vec![];
+        let count = u8::read(&mut reader)?;
+        for _ in 0..count {
+            buf.push(u8::read(&mut reader)?);
+        }
+        let label = String::from_utf8(buf)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let polynomial = Polynomial::<F>::read(&mut reader)?;
-        let degree_bound = Option::<usize>::read(&mut reader)?;
-        let hiding_bound = Option::<usize>::read(&mut reader)?;
+        let degree_bound = Option::<u32>::read(&mut reader)?.and_then(|v| Some(v as usize));
+        let hiding_bound = Option::<u32>::read(&mut reader)?.and_then(|v| Some(v as usize));
         Ok(LabeledPolynomial::<F>{
             label,
             polynomial: Rc::new(polynomial),
