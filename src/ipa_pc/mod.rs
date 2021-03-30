@@ -1053,6 +1053,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             .map(|poly| (poly.label(), poly))
             .collect();
 
+        let mut has_hiding = false;
         let mut points = vec![];
 
         // h(X)
@@ -1064,6 +1065,10 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 poly_map.get(label).ok_or(Error::MissingPolynomial {
                     label: label.to_string(),
                 })?;
+
+            if labeled_polynomial.hiding_bound().is_some() {
+                has_hiding = true;
+            }
 
             points.push(point);
 
@@ -1089,19 +1094,26 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let key_len = ck.comm_key.len();
         let p_len = batch_polynomial.coeffs.len();
+        let segments_count = std::cmp::max(1, p_len / key_len + if p_len % key_len != 0 { 1 } else { 0 });
+
+        let batch_randomness = if has_hiding {
+            Randomness::rand(segments_count, false, &mut rand::thread_rng())
+        } else {
+            Randomness::empty(segments_count)
+        };
 
         // Commitment of the h(X) polynomial
         let batch_commitment: Vec<G>;
 
         if p_len > key_len {
 
-            batch_commitment = (0..p_len / key_len + if p_len % key_len != 0 { 1 } else { 0 }).into_iter().map(
+            batch_commitment = (0..segments_count).into_iter().map(
                 |i| {
                     Self::cm_commit(
                         &ck.comm_key,
                         &batch_polynomial.coeffs[i * key_len..core::cmp::min((i + 1) * key_len, p_len)],
-                        None,
-                        None,
+                        Some(ck.s),
+                        Some(batch_randomness.rand[i]),
                     ).into_affine()
                 }
             ).collect();
@@ -1112,8 +1124,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 Self::cm_commit(
                     ck.comm_key.as_slice(),
                     batch_polynomial.coeffs.as_slice(),
-                    None,
-                    None,
+                    Some(ck.s),
+                    Some(batch_randomness.rand[0]),
                 ).into_affine()
             ];
         }
@@ -1138,11 +1150,12 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         // h(X) polynomial added to the set of polynomials for multi-poly single-point batching
         let mut labeled_polynomials = labeled_polynomials;
+        let batch_degree = batch_polynomial.degree();
         let labeled_batch_polynomial = LabeledPolynomial::new(
             format!("Batch"),
             batch_polynomial,
             None,
-            None
+            Some(batch_degree)
         );
         labeled_polynomials.push(&labeled_batch_polynomial);
 
@@ -1156,7 +1169,6 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         commitments.push(&labeled_batch_commitment);
 
         let mut rands = rands;
-        let batch_randomness = Randomness::empty(1);
         let labeled_batch_rand = LabeledRandomness::new(format!("Batch"), batch_randomness);
         rands.push(&labeled_batch_rand);
 
