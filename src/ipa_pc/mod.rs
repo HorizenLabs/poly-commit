@@ -1155,7 +1155,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             format!("Batch"),
             batch_polynomial,
             None,
-            Some(batch_degree)
+            if has_hiding { Some(batch_degree) } else { None }
         );
         labeled_polynomials.push(&labeled_batch_polynomial);
 
