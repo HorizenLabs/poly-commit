@@ -68,7 +68,7 @@ pub trait PCPreparedCommitment<UNPREPARED: PCCommitment>: Clone {
 /// commitment scheme.
 pub trait PCRandomness: Clone {
     /// Outputs empty randomness that does not hide the commitment.
-    fn empty() -> Self;
+    fn empty(segments_count: usize) -> Self;
 
     /// Samples randomness for commitments;
     /// `num_queries` specifies the number of queries that the commitment will be opened at.
@@ -89,17 +89,6 @@ pub trait PCProof: Clone + algebra::ToBytes {
 pub trait BatchPCProof: Clone + algebra::ToBytes {
     /// Size in bytes
     fn size_in_bytes(&self) -> usize;
-}
-
-
-/// General accumulator structure for a public aggregation scheme.
-pub trait PCAccumulator: Clone + algebra::ToBytes {
-
-    /// Commitment of a Public Polynomial
-    type Commitment: PCCommitment;
-
-    /// A succinct description of the public polynomial
-    type SuccinctDescription;
 }
 
 /// A polynomial along with information about its degree bound (if any), and the
@@ -177,7 +166,7 @@ pub struct LabeledCommitment<C: PCCommitment> {
 }
 
 impl<C: PCCommitment> LabeledCommitment<C> {
-    /// Instantiate a new polynomial_context.
+    /// Instantiate a new commitment_context.
     pub fn new(label: PolynomialLabel, commitment: C, degree_bound: Option<usize>) -> Self {
         Self {
             label,
@@ -209,7 +198,7 @@ impl<C: PCCommitment> algebra::ToBytes for LabeledCommitment<C> {
     }
 }
 
-/// A commitment along with information about its degree bound (if any).
+/// A labeled randomness.
 #[derive(Clone)]
 pub struct LabeledRandomness<R: PCRandomness> {
     label: PolynomialLabel,
@@ -217,7 +206,7 @@ pub struct LabeledRandomness<R: PCRandomness> {
 }
 
 impl<R: PCRandomness> LabeledRandomness<R> {
-    /// Instantiate a new polynomial_context.
+    /// Instantiate a new randomness_context.
     pub fn new(label: PolynomialLabel, randomness: R) -> Self {
         Self {
             label,

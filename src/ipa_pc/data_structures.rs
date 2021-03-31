@@ -171,22 +171,22 @@ Eq(bound = "")
 )]
 pub struct Randomness<G: AffineCurve> {
     /// Randomness is some scalar field element.
-    pub rand: G::ScalarField,
+    pub rand: Vec<G::ScalarField>,
 
     /// Randomness applied to the shifted commitment is some scalar field element.
     pub shifted_rand: Option<G::ScalarField>,
 }
 
 impl<G: AffineCurve> PCRandomness for Randomness<G> {
-    fn empty() -> Self {
+    fn empty(segments_count: usize) -> Self {
         Self {
-            rand: G::ScalarField::zero(),
+            rand: vec![G::ScalarField::zero(); segments_count],
             shifted_rand: None,
         }
     }
 
-    fn rand<R: RngCore>(_num_queries: usize, has_degree_bound: bool, rng: &mut R) -> Self {
-        let rand = G::ScalarField::rand(rng);
+    fn rand<R: RngCore>(segments_count: usize, has_degree_bound: bool, rng: &mut R) -> Self {
+        let rand = (0..segments_count).map(|_| G::ScalarField::rand(rng)).collect::<Vec<_>>();
         let shifted_rand = if has_degree_bound {
             Some(G::ScalarField::rand(rng))
         } else {
@@ -270,7 +270,7 @@ pub struct BatchProof<G: AffineCurve> {
     /// Commitment of the h(X) polynomial
     pub batch_commitment: Vec<G>,
 
-    /// Values: v_i = p_i(x), where x is fresh random challenge
+    /// Values: v_i = p(x_i), where the query points x_i are not necessarily distinct.
     pub batch_values: BTreeMap<String, G::ScalarField>
 }
 

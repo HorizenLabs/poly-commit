@@ -1076,11 +1076,11 @@ pub mod tests {
             PC: PolynomialCommitment<F>,
     {
         let info = TestInfo {
-            num_iters: 1,
+            num_iters: 100,
             max_degree: None,
             supported_degree: None,
             num_polynomials: 10,
-            enforce_degree_bounds: false,
+            enforce_degree_bounds: true,
             max_num_queries: 5,
             segmented: true,
             ..Default::default()

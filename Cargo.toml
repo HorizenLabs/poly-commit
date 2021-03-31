@@ -73,3 +73,13 @@ lto = "thin"
 incremental = true
 debug-assertions = false
 debug = false
+
+# Uncomment these lines for local development paths
+
+#[patch.'https://github.com/HorizenOfficial/ginger-lib.git']
+#algebra = { path = '../ginger-lib/algebra' }
+#algebra-utils = { path = '../ginger-lib/algebra-utils' }
+#bench-utils = { path = '../ginger-lib/bench-utils' }
+#
+#[patch.'https://github.com/HorizenOfficial/ginger-algebra-ocl']
+#algebra-kernels = { path = '../ginger-algebra-ocl/algebra-kernels' }
