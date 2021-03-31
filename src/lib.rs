@@ -83,7 +83,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// The prepared verifier key for the scheme; used to check an evaluation proof.
     type PreparedVerifierKey: PCPreparedVerifierKey<Self::VerifierKey> + Clone;
     /// The commitment to a polynomial.
-    type Commitment: PCCommitment + Default;
+    type Commitment: PCCommitment + Default + algebra::ToBytes;
     /// The prepared commitment to a polynomial.
     type PreparedCommitment: PCPreparedCommitment<Self::Commitment>;
     /// The commitment randomness.

@@ -1497,6 +1497,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             Self::Randomness: 'a,
             Self::Commitment: 'a,
     {
+        let key_len = ck.comm_key.len();
+
         let label_poly_map = polynomials
             .into_iter()
             .zip(rands)
@@ -1544,7 +1546,12 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 hiding_bound = std::cmp::max(hiding_bound, cur_poly.hiding_bound());
                 poly += (*coeff, cur_poly.polynomial());
 
-                combined_rand += &(cur_rand.randomness().rand[0] * coeff);
+                let mut combined_rand_lc = G::ScalarField::zero();
+                for (i, &rand_single) in cur_rand.randomness().rand.iter().enumerate() {
+                    let is = i * key_len;
+                    combined_rand_lc += rand_single * &coeff.pow(&[is as u64]);
+                }
+                combined_rand += combined_rand_lc * coeff;
                 combined_shifted_rand = Self::combine_shifted_rand(
                     combined_shifted_rand,
                     cur_rand.randomness().shifted_rand,
@@ -1552,7 +1559,12 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 );
 
                 let commitment = cur_comm.commitment();
-                combined_comm += &commitment.comm[0].mul(*coeff);
+                let mut combined_comm_lc = <G::Projective as ProjectiveCurve>::zero();
+                for (i, &comm_single) in commitment.comm.iter().enumerate() {
+                    let is = i * key_len;
+                    combined_comm_lc += &comm_single.mul(coeff.pow(&[is as u64]));
+                }
+                combined_comm += &combined_comm_lc.mul(coeff);
                 combined_shifted_comm = Self::combine_shifted_comm(
                     combined_shifted_comm,
                     commitment.shifted_comm,
@@ -1604,6 +1616,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         where
             Self::Commitment: 'a,
     {
+        let key_len = vk.comm_key.len();
+
         let BatchLCProof { proof, .. } = proof;
         let label_comm_map = commitments
             .into_iter()
@@ -1645,7 +1659,12 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                     }
 
                     let commitment = cur_comm.commitment();
-                    combined_comm += &commitment.comm[0].mul(*coeff);
+                    let mut combined_comm_lc = <G::Projective as ProjectiveCurve>::zero();
+                    for (i, &comm_single) in commitment.comm.iter().enumerate() {
+                        let is = i * key_len;
+                        combined_comm_lc += &comm_single.mul(coeff.pow(&[is as u64]));
+                    }
+                    combined_comm += &combined_comm_lc.mul(coeff);
                     combined_shifted_comm = Self::combine_shifted_comm(
                         combined_shifted_comm,
                         commitment.shifted_comm,

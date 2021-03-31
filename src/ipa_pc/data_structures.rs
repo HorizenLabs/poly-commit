@@ -66,15 +66,6 @@ impl<G: AffineCurve> PCCommitterKey for CommitterKey<G> {
     }
 }
 
-impl<G: AffineCurve> ToBytes for CommitterKey<G> {
-    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        self.comm_key.write(&mut writer)?;
-        self.h.write(&mut writer)?;
-        self.s.write(&mut writer)?;
-        (self.max_degree as u8).write(&mut writer)
-    }
-}
-
 /// `VerifierKey` is used to check evaluation proofs for a given commitment.
 pub type VerifierKey<G> = CommitterKey<G>;
 
@@ -337,12 +328,5 @@ impl<F: PrimeField> SuccinctCheckPolynomial<F> {
         }
 
         product
-    }
-}
-
-impl<F: PrimeField> ToBytes for SuccinctCheckPolynomial<F> {
-    #[inline]
-    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        self.0.write(&mut writer)
     }
 }
