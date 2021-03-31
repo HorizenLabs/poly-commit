@@ -984,6 +984,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 combined_commitment_proj += &comm_lc.mul(&cur_challenge);
 
                 if hiding_bound.is_some() {
+                    println!("{:?}", label);
                     has_hiding = true;
                     let mut rand_lc = G::ScalarField::zero();
                     for (i, rand_single) in labeled_randomness.randomness().rand.iter().enumerate() {
@@ -1351,7 +1352,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             format!("Batch"),
             batch_polynomial,
             None,
-            Some(batch_degree)
+            if has_hiding { Some(batch_degree) } else { None }
         );
         labeled_polynomials.push(&labeled_batch_polynomial);
 
