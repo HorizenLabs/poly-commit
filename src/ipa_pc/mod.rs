@@ -745,6 +745,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             let degree_bound = labeled_polynomial.degree_bound();
             let hiding_bound = labeled_polynomial.hiding_bound();
             let commitment = labeled_commitment.commitment();
+            let randomness = labeled_randomness.randomness();
 
             let p_len = polynomial.coeffs.len();
             let segments_count = p_len / key_len + if p_len % key_len != 0 { 1 } else { 0 };
@@ -767,39 +768,57 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 label
             );
 
+            if hiding_bound.is_some() {
+                has_hiding = true;
+            }
+
             if segments_count > 1 {
 
                 let mut polynomial_lc = Polynomial::zero();
+                let mut comm_lc = <G::Projective as ProjectiveCurve>::zero();
+                let mut rand_lc = G::ScalarField::zero();
+
                 for i in 0..segments_count {
                     let is = i * key_len;
-                    let poly_single = Polynomial::from_coefficients_slice(&polynomial.coeffs[i * key_len..core::cmp::min((i + 1) * key_len, p_len)]);
+                    let poly_single = Polynomial::from_coefficients_slice(
+                        &polynomial.coeffs[i * key_len..core::cmp::min((i + 1) * key_len, p_len)]
+                    );
+                    let comm_single = commitment.comm[i];
                     polynomial_lc += (point.pow(&[is as u64]), &poly_single);
-                }
-                combined_polynomial += (cur_challenge, &polynomial_lc);
-
-                let mut comm_lc = <G::Projective as ProjectiveCurve>::zero();
-                for (i, comm_single) in commitment.comm.iter().enumerate() {
-                    let is = i * key_len;
                     comm_lc += &comm_single.mul(point.pow(&[is as u64]));
-                }
-                combined_commitment_proj += &comm_lc.mul(&cur_challenge);
-
-                if hiding_bound.is_some() {
-                    has_hiding = true;
-                    let mut rand_lc = G::ScalarField::zero();
-                    for (i, rand_single) in labeled_randomness.randomness().rand.iter().enumerate() {
-                        let is = i * key_len;
+                    if has_hiding {
+                        let rand_single = randomness.rand[i];
                         rand_lc += &(point.pow(&[is as u64]) * rand_single);
                     }
+                }
+
+                combined_polynomial += (cur_challenge, &polynomial_lc);
+                combined_commitment_proj += &comm_lc.mul(&cur_challenge);
+                if has_hiding {
                     combined_rand += &(cur_challenge * &rand_lc);
                 }
 
-                cur_challenge = opening_challenges(opening_challenge_counter);
-                opening_challenge_counter += 1;
+            } else {
 
-                if let Some(degree_bound_len) = degree_bound_len {
+                combined_polynomial += (cur_challenge, polynomial);
+                combined_commitment_proj += &commitment.comm[0].mul(cur_challenge);
+
+                if has_hiding {
+                    combined_rand += &(cur_challenge * &randomness.rand[0]);
+                }
+            }
+
+            cur_challenge = opening_challenges(opening_challenge_counter);
+            opening_challenge_counter += 1;
+
+            if let Some(degree_bound_len) = degree_bound_len {
+
+                if segments_count > 1 {
+
                     let shifted_degree_bound = degree_bound_len % key_len - 1;
-                    let last_segment_polynomial = Polynomial::from_coefficients_slice(&polynomial.coeffs[(segments_count - 1) * key_len..p_len]);
+                    let last_segment_polynomial = Polynomial::from_coefficients_slice(
+                        &polynomial.coeffs[(segments_count - 1) * key_len..p_len]
+                    );
                     let shifted_polynomial = Self::shift_polynomial(
                         ck,
                         &last_segment_polynomial,
@@ -814,40 +833,24 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                     combined_commitment_proj += &commitment.comm[segments_count - 1].mul(cur_challenge * &shift);
 
                     if hiding_bound.is_some() {
-                        let shifted_rand = labeled_randomness.randomness().shifted_rand;
+                        let shifted_rand = randomness.shifted_rand;
                         assert!(
                             shifted_rand.is_some(),
                             "shifted_rand.is_none() for {}",
                             label
                         );
                         combined_rand += &(cur_challenge * &shifted_rand.unwrap());
-                        combined_rand += &(cur_challenge * &shift * &labeled_randomness.randomness().rand[segments_count - 1]);
+                        combined_rand += &(cur_challenge * &shift * &randomness.rand[segments_count - 1]);
                     }
 
-                    cur_challenge = opening_challenges(opening_challenge_counter);
-                    opening_challenge_counter += 1;
-                }
+                } else {
 
-            } else {
-
-                combined_polynomial += (cur_challenge, polynomial);
-                combined_commitment_proj += &commitment.comm[0].mul(cur_challenge);
-
-                if hiding_bound.is_some() {
-                    has_hiding = true;
-                    combined_rand += &(cur_challenge * &labeled_randomness.randomness().rand[0]);
-                }
-
-                cur_challenge = opening_challenges(opening_challenge_counter);
-                opening_challenge_counter += 1;
-
-                if degree_bound_len.is_some() {
                     let shifted_polynomial = Self::shift_polynomial(ck, polynomial, degree_bound.unwrap());
                     combined_polynomial += (cur_challenge, &shifted_polynomial);
                     combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
 
                     if hiding_bound.is_some() {
-                        let shifted_rand = labeled_randomness.randomness().shifted_rand;
+                        let shifted_rand = randomness.shifted_rand;
                         assert!(
                             shifted_rand.is_some(),
                             "shifted_rand.is_none() for {}",
@@ -855,10 +858,10 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                         );
                         combined_rand += &(cur_challenge * &shifted_rand.unwrap());
                     }
-
-                    cur_challenge = opening_challenges(opening_challenge_counter);
-                    opening_challenge_counter += 1;
                 }
+
+                cur_challenge = opening_challenges(opening_challenge_counter);
+                opening_challenge_counter += 1;
             }
         }
 
@@ -1367,25 +1370,26 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 hiding_bound = std::cmp::max(hiding_bound, cur_poly.hiding_bound());
                 poly += (*coeff, cur_poly.polynomial());
 
+                let randomness = cur_rand.randomness();
+                let commitment = cur_comm.commitment();
+
                 let mut combined_rand_lc = G::ScalarField::zero();
-                for (i, &rand_single) in cur_rand.randomness().rand.iter().enumerate() {
+                let mut combined_comm_lc = <G::Projective as ProjectiveCurve>::zero();
+
+                for (i, (&rand_single, &comm_single)) in randomness.rand.iter().zip(commitment.comm.iter()).enumerate() {
                     let is = i * key_len;
                     combined_rand_lc += rand_single * &coeff.pow(&[is as u64]);
+                    combined_comm_lc += &comm_single.mul(coeff.pow(&[is as u64]));
                 }
+
                 combined_rand += combined_rand_lc * coeff;
+                combined_comm += &combined_comm_lc.mul(coeff);
+
                 combined_shifted_rand = Self::combine_shifted_rand(
                     combined_shifted_rand,
                     cur_rand.randomness().shifted_rand,
                     *coeff,
                 );
-
-                let commitment = cur_comm.commitment();
-                let mut combined_comm_lc = <G::Projective as ProjectiveCurve>::zero();
-                for (i, &comm_single) in commitment.comm.iter().enumerate() {
-                    let is = i * key_len;
-                    combined_comm_lc += &comm_single.mul(coeff.pow(&[is as u64]));
-                }
-                combined_comm += &combined_comm_lc.mul(coeff);
                 combined_shifted_comm = Self::combine_shifted_comm(
                     combined_shifted_comm,
                     commitment.shifted_comm,
