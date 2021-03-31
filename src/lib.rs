@@ -643,6 +643,7 @@ pub mod tests {
                 None
             };
 
+            let seg_mul = rand::distributions::Uniform::from(5..=15).sample(rng);
             let mut labels = Vec::new();
             println!("Sampled supported degree");
 
@@ -652,16 +653,31 @@ pub mod tests {
             for i in 0..num_polynomials {
                 let label = format!("Test{}", i);
                 labels.push(label.clone());
-                let degree = if supported_degree > 0 {
-                    rand::distributions::Uniform::from(1..=supported_degree).sample(rng)
+
+                let degree;
+                if segmented {
+                    degree = if supported_degree > 0 {
+                        rand::distributions::Uniform::from(1..=supported_degree).sample(rng)
+                    } else {
+                        0
+                    } * seg_mul;
                 } else {
-                    0
-                };
-                let poly = Polynomial::rand(degree * if segmented { 10 } else { 1 }, rng);
+                    degree = if supported_degree > 0 {
+                        rand::distributions::Uniform::from(1..=supported_degree).sample(rng)
+                    } else {
+                        0
+                    }
+                }
+                let poly = Polynomial::rand(degree, rng);
 
                 let degree_bound = if let Some(degree_bounds) = &mut degree_bounds {
-                    let range = rand::distributions::Uniform::from(degree..=supported_degree);
-                    let degree_bound = range.sample(rng);
+                    let degree_bound;
+                    if segmented {
+                        degree_bound = degree;
+                    } else {
+                        let range = rand::distributions::Uniform::from(degree..=supported_degree);
+                        degree_bound = range.sample(rng);
+                    }
                     degree_bounds.push(degree_bound);
                     Some(degree_bound)
                 } else {
