@@ -17,7 +17,7 @@ pub trait PCUniversalParams: Clone + std::fmt::Debug {
 
 /// Defines the minimal interface of committer keys for any polynomial
 /// commitment scheme.
-pub trait PCCommitterKey: Clone + std::fmt::Debug {
+pub trait PCCommitterKey: Clone + std::fmt::Debug + Eq + PartialEq {
     /// Outputs the maximum degree supported by the universal parameters
     /// `Self` was derived from.
     fn max_degree(&self) -> usize;
@@ -28,7 +28,7 @@ pub trait PCCommitterKey: Clone + std::fmt::Debug {
 
 /// Defines the minimal interface of verifier keys for any polynomial
 /// commitment scheme.
-pub trait PCVerifierKey: Clone + std::fmt::Debug {
+pub trait PCVerifierKey: Clone + std::fmt::Debug + Eq + PartialEq {
     /// Outputs the maximum degree supported by the universal parameters
     /// `Self` was derived from.
     fn max_degree(&self) -> usize;
@@ -68,7 +68,7 @@ pub trait PCPreparedCommitment<UNPREPARED: PCCommitment>: Clone {
 /// commitment scheme.
 pub trait PCRandomness: Clone + algebra::ToBytes + algebra::FromBytes {
     /// Outputs empty randomness that does not hide the commitment.
-    fn empty() -> Self;
+    fn empty(segments_count: usize) -> Self;
 
     /// Samples randomness for commitments;
     /// `num_queries` specifies the number of queries that the commitment will be opened at.
@@ -80,6 +80,13 @@ pub trait PCRandomness: Clone + algebra::ToBytes + algebra::FromBytes {
 /// Defines the minimal interface of evaluation proofs for any polynomial
 /// commitment scheme.
 pub trait PCProof: Clone + algebra::ToBytes + algebra::FromBytes {
+    /// Size in bytes
+    fn size_in_bytes(&self) -> usize;
+}
+
+/// Defines the minimal interface of evaluation proofs for any polynomial
+/// batch commitment scheme.
+pub trait BatchPCProof: Clone + algebra::ToBytes {
     /// Size in bytes
     fn size_in_bytes(&self) -> usize;
 }
@@ -195,7 +202,7 @@ pub struct LabeledCommitment<C: PCCommitment> {
 }
 
 impl<C: PCCommitment> LabeledCommitment<C> {
-    /// Instantiate a new polynomial_context.
+    /// Instantiate a new commitment_context.
     pub fn new(label: PolynomialLabel, commitment: C, degree_bound: Option<usize>) -> Self {
         Self {
             label,
@@ -225,6 +232,33 @@ impl<C: PCCommitment> algebra::ToBytes for LabeledCommitment<C> {
     fn write<W: std::io::Write>(&self, mut w: W) -> std::io::Result<()> {
         self.commitment.write(&mut w)?;
         Ok(())
+    }
+}
+
+/// A labeled randomness.
+#[derive(Clone)]
+pub struct LabeledRandomness<R: PCRandomness> {
+    label: PolynomialLabel,
+    randomness: R,
+}
+
+impl<R: PCRandomness> LabeledRandomness<R> {
+    /// Instantiate a new randomness_context.
+    pub fn new(label: PolynomialLabel, randomness: R) -> Self {
+        Self {
+            label,
+            randomness,
+        }
+    }
+
+    /// Return the label for `self`.
+    pub fn label(&self) -> &String {
+        &self.label
+    }
+
+    /// Retrieve the commitment from `self`.
+    pub fn randomness(&self) -> &R {
+        &self.randomness
     }
 }
 

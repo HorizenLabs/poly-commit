@@ -17,6 +17,13 @@ pub enum Error {
         label: String,
     },
 
+    /// `Evaluations` does not contain an evaluation for the polynomial labelled
+    /// `label` at a particular query.
+    MissingBatchEvaluation {
+        /// The label of the missing polynomial.
+        label: String,
+    },
+
     /// The LHS of the equation is empty.
     MissingLHS {
         /// The label of the equation.
@@ -82,6 +89,9 @@ pub enum Error {
 
     /// The commitment was generated incorrectly, tampered with, or doesn't support the polynomial.
     MalformedCommitment(String),
+
+    /// Failed succinct check
+    FailedSuccinctCheck,
 }
 
 impl std::fmt::Display for Error {
@@ -95,6 +105,11 @@ impl std::fmt::Display for Error {
             Error::MissingEvaluation { label } => write!(
                 f,
                 "`QuerySet` refers to polynomial \"{}\", but `Evaluations` does not contain an evaluation for it.",
+                label
+            ),
+            Error::MissingBatchEvaluation { label } => write!(
+                f,
+                "`QuerySet` refers to polynomial \"{}\", but `BatchEvaluations` does not contain an evaluation for it.",
                 label
             ),
             Error::MissingLHS { label } => {
@@ -155,7 +170,8 @@ impl std::fmt::Display for Error {
                 degree_bound, label, poly_degree, supported_degree
             ),
             Error::IncorrectInputLength(err) => write!(f, "{}", err),
-            Error::MalformedCommitment(err) => write!(f, "{}", err)
+            Error::MalformedCommitment(err) => write!(f, "{}", err),
+            Error::FailedSuccinctCheck => write!(f, "Failed succinct check")
         }
     }
 }

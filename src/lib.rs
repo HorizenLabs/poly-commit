@@ -38,32 +38,6 @@ pub use error::*;
 /// checker.
 pub mod optional_rng;
 
-/*/// The core [[KZG10]][kzg] construction.
-///
-/// [kzg]: http://cacr.uwaterloo.ca/techreports/2010/cacr2010-10.pdf
-pub mod kzg10;
-
-/// Polynomial commitment scheme from [[KZG10]][kzg] that enforces
-/// strict degree bounds and (optionally) enables hiding commitments by
-/// following the approach outlined in [[CHMMVW20, "Marlin"]][marlin].
-///
-/// [kzg]: http://cacr.uwaterloo.ca/techreports/2010/cacr2010-10.pdf
-/// [marlin]: https://eprint.iacr.org/2019/1047
-pub mod marlin_pc;
-
-/// Polynomial commitment scheme based on the construction in [[KZG10]][kzg],
-/// modified to obtain batching and to enforce strict
-/// degree bounds by following the approach outlined in [[MBKM19,
-/// “Sonic”]][sonic] (more precisely, via the variant in
-/// [[Gabizon19, “AuroraLight”]][al] that avoids negative G1 powers).
-///
-/// [kzg]: http://cacr.uwaterloo.ca/techreports/2010/cacr2010-10.pdf
-/// [sonic]: https://eprint.iacr.org/2019/099
-/// [al]: https://eprint.iacr.org/2019/601
-/// [marlin]: https://eprint.iacr.org/2019/1047
-pub mod sonic_pc;
-*/
-
 /// A polynomial commitment scheme based on the hardness of the
 /// discrete logarithm problem in prime-order groups.
 /// The construction is detailed in [[BCMS20]][pcdas].
@@ -161,15 +135,14 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// The evaluation proof for a single point.
     type Proof: PCProof + Clone;
     /// The evaluation proof for a query set.
-    type BatchProof: Clone + From<Vec<Self::Proof>> + Into<Vec<Self::Proof>>;
+    type BatchProof: BatchPCProof + Clone;
     /// The error type for the scheme.
     type Error: std::error::Error + From<Error>;
 
     /// Constructs public parameters when given as input the maximum degree `degree`
     /// for the polynomial commitment scheme.
-    fn setup<R: RngCore>(
+    fn setup(
         max_degree: usize,
-        rng: &mut R,
     ) -> Result<Self::UniversalParams, Self::Error>;
 
     /// Specializes the public parameters for polynomials up to the given `supported_degree`
@@ -177,8 +150,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     fn trim(
         pp: &Self::UniversalParams,
         supported_degree: usize,
-        supported_hiding_bound: usize,
-        enforced_degree_bounds: Option<&[usize]>,
     ) -> Result<(Self::CommitterKey, Self::VerifierKey), Self::Error>;
 
     /// Outputs a commitments to `polynomials`. If `polynomials[i].is_hiding()`,
@@ -197,7 +168,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     ) -> Result<
         (
             Vec<LabeledCommitment<Self::Commitment>>,
-            Vec<Self::Randomness>,
+            Vec<LabeledRandomness<Self::Randomness>>,
         ),
         Self::Error,
     >;
@@ -210,12 +181,12 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         point: F,
         opening_challenge: F,
-        rands: impl IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<Self::Proof, Self::Error>
-    where
-        Self::Randomness: 'a,
-        Self::Commitment: 'a,
+        where
+            Self::Randomness: 'a,
+            Self::Commitment: 'a,
     {
         let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::open_individual_opening_challenges(
@@ -237,12 +208,12 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         opening_challenge: F,
-        rands: impl IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<Self::BatchProof, Self::Error>
-    where
-        Self::Randomness: 'a,
-        Self::Commitment: 'a,
+        where
+            Self::Randomness: 'a,
+            Self::Commitment: 'a,
     {
         let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::batch_open_individual_opening_challenges(
@@ -265,10 +236,9 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         values: impl IntoIterator<Item = F>,
         proof: &Self::Proof,
         opening_challenge: F,
-        rng: Option<&mut dyn RngCore>,
     ) -> Result<bool, Self::Error>
-    where
-        Self::Commitment: 'a,
+        where
+            Self::Commitment: 'a,
     {
         let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::check_individual_opening_challenges(
@@ -278,23 +248,21 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             values,
             proof,
             &opening_challenges,
-            rng,
         )
     }
 
     /// Checks that `values` are the true evaluations at `query_set` of the polynomials
     /// committed in `labeled_commitments`.
-    fn batch_check<'a, R: RngCore>(
+    fn batch_check<'a>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         evaluations: &Evaluations<F>,
         proof: &Self::BatchProof,
         opening_challenge: F,
-        rng: &mut R,
     ) -> Result<bool, Self::Error>
-    where
-        Self::Commitment: 'a,
+        where
+            Self::Commitment: 'a,
     {
         let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::batch_check_individual_opening_challenges(
@@ -304,7 +272,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             evaluations,
             proof,
             &opening_challenges,
-            rng,
         )
     }
 
@@ -318,12 +285,12 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         opening_challenge: F,
-        rands: impl IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<BatchLCProof<F, Self>, Self::Error>
-    where
-        Self::Randomness: 'a,
-        Self::Commitment: 'a,
+        where
+            Self::Randomness: 'a,
+            Self::Commitment: 'a,
     {
         let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::open_combinations_individual_opening_challenges(
@@ -340,7 +307,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
 
     /// Checks that `evaluations` are the true evaluations at `query_set` of the
     /// linear combinations of polynomials committed in `commitments`.
-    fn check_combinations<'a, R: RngCore>(
+    fn check_combinations<'a>(
         vk: &Self::VerifierKey,
         linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
@@ -348,10 +315,9 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         eqn_evaluations: &Evaluations<F>,
         proof: &BatchLCProof<F, Self>,
         opening_challenge: F,
-        rng: &mut R,
     ) -> Result<bool, Self::Error>
-    where
-        Self::Commitment: 'a,
+        where
+            Self::Commitment: 'a,
     {
         let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::check_combinations_individual_opening_challenges(
@@ -362,7 +328,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             eqn_evaluations,
             proof,
             &opening_challenges,
-            rng,
         )
     }
 
@@ -373,12 +338,26 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         point: F,
         opening_challenges: &dyn Fn(u64) -> F,
-        rands: impl IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<Self::Proof, Self::Error>
-    where
-        Self::Randomness: 'a,
-        Self::Commitment: 'a;
+        where
+            Self::Randomness: 'a,
+            Self::Commitment: 'a;
+
+    /// batch_open with individual challenges
+    fn batch_open_individual_opening_challenges<'a>(
+        ck: &Self::CommitterKey,
+        labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
+        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
+        query_set: &QuerySet<F>,
+        opening_challenges: &dyn Fn(u64) -> F,
+        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
+        rng: Option<&mut dyn RngCore>,
+    ) -> Result<Self::BatchProof, Self::Error>
+        where
+            Self::Randomness: 'a,
+            Self::Commitment: 'a;
 
     /// check but with individual challenges
     fn check_individual_opening_challenges<'a>(
@@ -388,73 +367,21 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         values: impl IntoIterator<Item = F>,
         proof: &Self::Proof,
         opening_challenges: &dyn Fn(u64) -> F,
-        rng: Option<&mut dyn RngCore>,
     ) -> Result<bool, Self::Error>
-    where
-        Self::Commitment: 'a;
+        where
+            Self::Commitment: 'a;
 
     /// batch_check but with individual challenges
-    fn batch_check_individual_opening_challenges<'a, R: RngCore>(
+    fn batch_check_individual_opening_challenges<'a>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         evaluations: &Evaluations<F>,
         proof: &Self::BatchProof,
         opening_challenges: &dyn Fn(u64) -> F,
-        rng: &mut R,
     ) -> Result<bool, Self::Error>
-    where
-        Self::Commitment: 'a,
-    {
-        let commitments: BTreeMap<_, _> = commitments.into_iter().map(|c| (c.label(), c)).collect();
-        let mut query_to_labels_map = BTreeMap::new();
-        for (label, (point_label, point)) in query_set.iter() {
-            let labels = query_to_labels_map
-                .entry(point_label)
-                .or_insert((point, BTreeSet::new()));
-            labels.1.insert(label);
-        }
-
-        // Implicit assumption: proofs are order in same manner as queries in
-        // `query_to_labels_map`.
-        let proofs: Vec<_> = proof.clone().into();
-        assert_eq!(proofs.len(), query_to_labels_map.len());
-
-        let mut result = true;
-        for ((_point_label, (point, labels)), proof) in query_to_labels_map.into_iter().zip(proofs)
-        {
-            let mut comms: Vec<&'_ LabeledCommitment<_>> = Vec::new();
-            let mut values = Vec::new();
-            for label in labels.into_iter() {
-                let commitment = commitments.get(label).ok_or(Error::MissingPolynomial {
-                    label: label.to_string(),
-                })?;
-
-                let v_i =
-                    evaluations
-                        .get(&(label.clone(), *point))
-                        .ok_or(Error::MissingEvaluation {
-                            label: label.to_string(),
-                        })?;
-
-                comms.push(commitment);
-                values.push(*v_i);
-            }
-
-            let proof_time = start_timer!(|| "Checking per-query proof");
-            result &= Self::check_individual_opening_challenges(
-                vk,
-                comms,
-                *point,
-                values,
-                &proof,
-                opening_challenges,
-                Some(rng),
-            )?;
-            end_timer!(proof_time);
-        }
-        Ok(result)
-    }
+        where
+            Self::Commitment: 'a;
 
     /// open_combinations but with individual challenges
     fn open_combinations_individual_opening_challenges<'a>(
@@ -464,12 +391,12 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         opening_challenges: &dyn Fn(u64) -> F,
-        rands: impl IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<BatchLCProof<F, Self>, Self::Error>
-    where
-        Self::Randomness: 'a,
-        Self::Commitment: 'a,
+        where
+            Self::Randomness: 'a,
+            Self::Commitment: 'a,
     {
         let linear_combinations: Vec<_> = linear_combinations.into_iter().collect();
         let polynomials: Vec<_> = polynomials.into_iter().collect();
@@ -492,7 +419,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     }
 
     /// check_combinations with individual challenges
-    fn check_combinations_individual_opening_challenges<'a, R: RngCore>(
+    fn check_combinations_individual_opening_challenges<'a>(
         vk: &Self::VerifierKey,
         linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
@@ -500,10 +427,9 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         eqn_evaluations: &Evaluations<F>,
         proof: &BatchLCProof<F, Self>,
         opening_challenges: &dyn Fn(u64) -> F,
-        rng: &mut R,
     ) -> Result<bool, Self::Error>
-    where
-        Self::Commitment: 'a,
+        where
+            Self::Commitment: 'a,
     {
         let BatchLCProof { proof, evals } = proof;
 
@@ -552,88 +478,14 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             &poly_evals,
             proof,
             opening_challenges,
-            rng,
         )?;
+
         if !pc_result {
             eprintln!("Evaluation proofs failed to verify");
             return Ok(false);
         }
 
         Ok(true)
-    }
-
-    /// batch_open with individual challenges
-    fn batch_open_individual_opening_challenges<'a>(
-        ck: &Self::CommitterKey,
-        labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
-        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
-        query_set: &QuerySet<F>,
-        opening_challenges: &dyn Fn(u64) -> F,
-        rands: impl IntoIterator<Item = &'a Self::Randomness>,
-        rng: Option<&mut dyn RngCore>,
-    ) -> Result<Self::BatchProof, Self::Error>
-    where
-        Self::Randomness: 'a,
-        Self::Commitment: 'a,
-    {
-        let rng = &mut crate::optional_rng::OptionalRng(rng);
-        let poly_rand_comm: BTreeMap<_, _> = labeled_polynomials
-            .into_iter()
-            .zip(rands)
-            .zip(commitments.into_iter())
-            .map(|((poly, r), comm)| (poly.label(), (poly, r, comm)))
-            .collect();
-
-        let open_time = start_timer!(|| format!(
-            "Opening {} polynomials at query set of size {}",
-            poly_rand_comm.len(),
-            query_set.len(),
-        ));
-
-        let mut query_to_labels_map = BTreeMap::new();
-
-        for (label, (point_label, point)) in query_set.iter() {
-            let labels = query_to_labels_map
-                .entry(point_label)
-                .or_insert((point, BTreeSet::new()));
-            labels.1.insert(label);
-        }
-
-        let mut proofs = Vec::new();
-        for (_point_label, (point, labels)) in query_to_labels_map.into_iter() {
-            let mut query_polys: Vec<&'a LabeledPolynomial<_>> = Vec::new();
-            let mut query_rands: Vec<&'a Self::Randomness> = Vec::new();
-            let mut query_comms: Vec<&'a LabeledCommitment<Self::Commitment>> = Vec::new();
-
-            for label in labels {
-                let (polynomial, rand, comm) =
-                    poly_rand_comm.get(label).ok_or(Error::MissingPolynomial {
-                        label: label.to_string(),
-                    })?;
-
-                query_polys.push(polynomial);
-                query_rands.push(rand);
-                query_comms.push(comm);
-            }
-
-            let proof_time = start_timer!(|| "Creating proof");
-            let proof = Self::open_individual_opening_challenges(
-                ck,
-                query_polys,
-                query_comms,
-                *point,
-                opening_challenges,
-                query_rands,
-                Some(rng),
-            )?;
-
-            end_timer!(proof_time);
-
-            proofs.push(proof);
-        }
-        end_timer!(open_time);
-
-        Ok(proofs.into())
     }
 }
 
@@ -652,6 +504,28 @@ pub fn evaluate_query_set<'a, F: Field>(
         evaluations.insert((label.clone(), *point), eval);
     }
     evaluations
+}
+
+/// Evaluate the given polynomials at `query_set` and returns a Vec<((poly_label, point_label), eval)>)
+pub fn evaluate_query_set_to_vec<'a, F: Field>(
+    polys: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
+    query_set: &QuerySet<'a, F>,
+) -> Vec<((String, String), F)>
+{
+    // use std::{
+    //     collections::BTreeMap,
+    //     iter::FromIterator,
+    // };
+    let polys = BTreeMap::from_iter(polys.into_iter().map(|p| (p.label(), p)));
+    let mut v = Vec::new();
+    for (label, (point_label, point)) in query_set {
+        let poly = polys
+            .get(label)
+            .expect("polynomial in evaluated lc is not found");
+        let eval = poly.evaluate(*point);
+        v.push(((label.clone(), point_label.clone()), eval));
+    }
+    v
 }
 
 fn lc_query_set_to_poly_query_set<'a, F: 'a + Field>(
@@ -679,7 +553,7 @@ pub mod tests {
     use algebra::Field;
     use rand::{distributions::Distribution, Rng, thread_rng};
 
-    #[derive(Default)]
+    #[derive(Copy, Clone, Default)]
     struct TestInfo {
         num_iters: usize,
         max_degree: Option<usize>,
@@ -688,16 +562,17 @@ pub mod tests {
         enforce_degree_bounds: bool,
         max_num_queries: usize,
         num_equations: Option<usize>,
+        segmented: bool
     }
 
     pub fn bad_degree_bound_test<F, PC>() -> Result<(), PC::Error>
-    where
-        F: Field,
-        PC: PolynomialCommitment<F>,
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
     {
         let rng = &mut thread_rng();
         let max_degree = 100;
-        let pp = PC::setup(max_degree, rng)?;
+        let pp = PC::setup(max_degree)?;
 
         for _ in 0..10 {
             let supported_degree = rand::distributions::Uniform::from(1..=max_degree).sample(rng);
@@ -737,8 +612,6 @@ pub mod tests {
             let (ck, vk) = PC::trim(
                 &pp,
                 supported_degree,
-                supported_hiding_bound,
-                Some(degree_bounds.as_slice()),
             )?;
             println!("Trimmed");
 
@@ -771,7 +644,6 @@ pub mod tests {
                 &values,
                 &proof,
                 opening_challenge,
-                rng,
             )?;
             assert!(result, "proof was incorrect, Query set: {:#?}", query_set);
         }
@@ -779,26 +651,26 @@ pub mod tests {
     }
 
     fn test_template<F, PC>(info: TestInfo) -> Result<(), PC::Error>
-    where
-        F: Field,
-        PC: PolynomialCommitment<F>,
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
     {
-        let TestInfo {
-            num_iters,
-            max_degree,
-            supported_degree,
-            num_polynomials,
-            enforce_degree_bounds,
-            max_num_queries,
-            ..
-        } = info;
+        for _ in 0..info.num_iters {
+            let TestInfo {
+                max_degree,
+                supported_degree,
+                num_polynomials,
+                enforce_degree_bounds,
+                max_num_queries,
+                segmented,
+                ..
+            } = info;
 
-        let rng = &mut thread_rng();
-        let max_degree =
-            max_degree.unwrap_or(rand::distributions::Uniform::from(2..=64).sample(rng));
-        let pp = PC::setup(max_degree, rng)?;
+            let rng = &mut thread_rng();
+            let max_degree =
+                max_degree.unwrap_or(rand::distributions::Uniform::from(2..=64).sample(rng));
+            let pp = PC::setup(max_degree)?;
 
-        for _ in 0..num_iters {
             let supported_degree = match supported_degree {
                 Some(0) => 0,
                 Some(d) => d,
@@ -815,6 +687,7 @@ pub mod tests {
                 None
             };
 
+            let seg_mul = rand::distributions::Uniform::from(5..=15).sample(rng);
             let mut labels = Vec::new();
             println!("Sampled supported degree");
 
@@ -824,16 +697,31 @@ pub mod tests {
             for i in 0..num_polynomials {
                 let label = format!("Test{}", i);
                 labels.push(label.clone());
-                let degree = if supported_degree > 0 {
-                    rand::distributions::Uniform::from(1..=supported_degree).sample(rng)
+
+                let degree;
+                if segmented {
+                    degree = if supported_degree > 0 {
+                        rand::distributions::Uniform::from(1..=supported_degree).sample(rng)
+                    } else {
+                        0
+                    } * seg_mul;
                 } else {
-                    0
-                };
+                    degree = if supported_degree > 0 {
+                        rand::distributions::Uniform::from(1..=supported_degree).sample(rng)
+                    } else {
+                        0
+                    }
+                }
                 let poly = Polynomial::rand(degree, rng);
 
                 let degree_bound = if let Some(degree_bounds) = &mut degree_bounds {
-                    let range = rand::distributions::Uniform::from(degree..=supported_degree);
-                    let degree_bound = range.sample(rng);
+                    let degree_bound;
+                    if segmented {
+                        degree_bound = degree;
+                    } else {
+                        let range = rand::distributions::Uniform::from(degree..=supported_degree);
+                        degree_bound = range.sample(rng);
+                    }
                     degree_bounds.push(degree_bound);
                     Some(degree_bound)
                 } else {
@@ -865,8 +753,6 @@ pub mod tests {
             let (ck, vk) = PC::trim(
                 &pp,
                 supported_degree,
-                supported_hiding_bound,
-                degree_bounds.as_ref().map(|s| s.as_slice()),
             )?;
             println!("Trimmed");
 
@@ -896,6 +782,7 @@ pub mod tests {
                 &rands,
                 Some(rng),
             )?;
+
             let result = PC::batch_check(
                 &vk,
                 &comms,
@@ -903,7 +790,6 @@ pub mod tests {
                 &values,
                 &proof,
                 opening_challenge,
-                rng,
             )?;
             if !result {
                 println!(
@@ -921,9 +807,9 @@ pub mod tests {
     }
 
     fn equation_test_template<F, PC>(info: TestInfo) -> Result<(), PC::Error>
-    where
-        F: Field,
-        PC: PolynomialCommitment<F>,
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
     {
         let TestInfo {
             num_iters,
@@ -933,12 +819,13 @@ pub mod tests {
             enforce_degree_bounds,
             max_num_queries,
             num_equations,
+            ..
         } = info;
 
         let rng = &mut thread_rng();
         let max_degree =
             max_degree.unwrap_or(rand::distributions::Uniform::from(2..=64).sample(rng));
-        let pp = PC::setup(max_degree, rng)?;
+        let pp = PC::setup(max_degree)?;
 
         for _ in 0..num_iters {
             let supported_degree = supported_degree
@@ -1002,8 +889,6 @@ pub mod tests {
             let (ck, vk) = PC::trim(
                 &pp,
                 supported_degree,
-                supported_degree,
-                degree_bounds.as_ref().map(|s| s.as_slice()),
             )?;
             println!("Trimmed");
 
@@ -1072,7 +957,6 @@ pub mod tests {
                 &values,
                 &proof,
                 opening_challenge,
-                rng,
             )?;
             if !result {
                 println!(
@@ -1111,9 +995,9 @@ pub mod tests {
     }
 
     pub fn single_poly_test<F, PC>() -> Result<(), PC::Error>
-    where
-        F: Field,
-        PC: PolynomialCommitment<F>,
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1128,9 +1012,9 @@ pub mod tests {
     }
 
     pub fn linear_poly_degree_bound_test<F, PC>() -> Result<(), PC::Error>
-    where
-        F: Field,
-        PC: PolynomialCommitment<F>,
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1145,9 +1029,9 @@ pub mod tests {
     }
 
     pub fn single_poly_degree_bound_test<F, PC>() -> Result<(), PC::Error>
-    where
-        F: Field,
-        PC: PolynomialCommitment<F>,
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1162,9 +1046,9 @@ pub mod tests {
     }
 
     pub fn quadratic_poly_degree_bound_multiple_queries_test<F, PC>() -> Result<(), PC::Error>
-    where
-        F: Field,
-        PC: PolynomialCommitment<F>,
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1178,10 +1062,27 @@ pub mod tests {
         test_template::<F, PC>(info)
     }
 
-    pub fn single_poly_degree_bound_multiple_queries_test<F, PC>() -> Result<(), PC::Error>
+    pub fn two_poly_four_points_test<F, PC>() -> Result<(), PC::Error>
     where
         F: Field,
         PC: PolynomialCommitment<F>,
+    {
+        let info = TestInfo {
+            num_iters: 1,
+            max_degree: Some(1024),
+            supported_degree: Some(1024),
+            num_polynomials: 2,
+            enforce_degree_bounds: true,
+            max_num_queries: 4,
+            ..Default::default()
+        };
+        test_template::<F, PC>(info)
+    }
+
+    pub fn single_poly_degree_bound_multiple_queries_test<F, PC>() -> Result<(), PC::Error>
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1196,9 +1097,9 @@ pub mod tests {
     }
 
     pub fn two_polys_degree_bound_single_query_test<F, PC>() -> Result<(), PC::Error>
-    where
-        F: Field,
-        PC: PolynomialCommitment<F>,
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1213,9 +1114,9 @@ pub mod tests {
     }
 
     pub fn full_end_to_end_test<F, PC>() -> Result<(), PC::Error>
-    where
-        F: Field,
-        PC: PolynomialCommitment<F>,
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1229,10 +1130,28 @@ pub mod tests {
         test_template::<F, PC>(info)
     }
 
+    pub fn segmented_test<F, PC>() -> Result<(), PC::Error>
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
+    {
+        let info = TestInfo {
+            num_iters: 100,
+            max_degree: None,
+            supported_degree: None,
+            num_polynomials: 10,
+            enforce_degree_bounds: true,
+            max_num_queries: 5,
+            segmented: true,
+            ..Default::default()
+        };
+        test_template::<F, PC>(info)
+    }
+
     pub fn full_end_to_end_equation_test<F, PC>() -> Result<(), PC::Error>
-    where
-        F: Field,
-        PC: PolynomialCommitment<F>,
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1242,14 +1161,15 @@ pub mod tests {
             enforce_degree_bounds: true,
             max_num_queries: 5,
             num_equations: Some(10),
+            segmented: false,
         };
         equation_test_template::<F, PC>(info)
     }
 
     pub fn single_equation_test<F, PC>() -> Result<(), PC::Error>
-    where
-        F: Field,
-        PC: PolynomialCommitment<F>,
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1259,14 +1179,15 @@ pub mod tests {
             enforce_degree_bounds: false,
             max_num_queries: 1,
             num_equations: Some(1),
+            segmented: false,
         };
         equation_test_template::<F, PC>(info)
     }
 
     pub fn two_equation_test<F, PC>() -> Result<(), PC::Error>
-    where
-        F: Field,
-        PC: PolynomialCommitment<F>,
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1276,14 +1197,15 @@ pub mod tests {
             enforce_degree_bounds: false,
             max_num_queries: 1,
             num_equations: Some(2),
+            segmented: false,
         };
         equation_test_template::<F, PC>(info)
     }
 
     pub fn two_equation_degree_bound_test<F, PC>() -> Result<(), PC::Error>
-    where
-        F: Field,
-        PC: PolynomialCommitment<F>,
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
     {
         let info = TestInfo {
             num_iters: 100,
@@ -1293,6 +1215,7 @@ pub mod tests {
             enforce_degree_bounds: true,
             max_num_queries: 1,
             num_equations: Some(2),
+            segmented: false,
         };
         equation_test_template::<F, PC>(info)
     }
