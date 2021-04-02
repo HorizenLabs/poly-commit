@@ -1,12 +1,17 @@
 use crate::*;
 use crate::{PCCommitterKey, PCVerifierKey, Vec};
-use algebra::{Field, ToBytes, to_bytes, FromBytes, UniformRand, AffineCurve, PrimeField};
-use std::vec;
+use algebra::{
+    Field, UniformRand, AffineCurve, PrimeField,
+};
+use std::{
+    io::{ Read, Write }, vec, convert::TryFrom,
+};
 use rand_core::RngCore;
 
 /// `UniversalParams` are the universal parameters for the inner product arg scheme.
 #[derive(Derivative)]
 #[derivative(Default(bound = ""), Clone(bound = ""), Debug(bound = ""))]
+#[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct UniversalParams<G: AffineCurve> {
     /// The key used to commit to polynomials.
     pub comm_key: Vec<G>,
@@ -38,6 +43,7 @@ Debug(bound = ""),
 Eq(bound = ""),
 PartialEq(bound = ""),
 )]
+#[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct CommitterKey<G: AffineCurve> {
     /// The key used to commit to polynomials.
     pub comm_key: Vec<G>,
@@ -63,38 +69,6 @@ impl<G: AffineCurve> PCCommitterKey for CommitterKey<G> {
     }
     fn supported_degree(&self) -> usize {
         self.comm_key.len() - 1
-    }
-}
-
-impl<G: AffineCurve> ToBytes for CommitterKey<G> {
-    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        (self.comm_key.len() as u32).write(&mut writer)?;
-        for item in self.comm_key.iter() {
-            item.write(&mut writer)?;
-        }
-        self.h.write(&mut writer)?;
-        self.s.write(&mut writer)?;
-        (self.max_degree as u8).write(&mut writer)
-    }
-}
-
-impl<G: AffineCurve> FromBytes for CommitterKey<G> {
-    #[inline]
-    fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<CommitterKey<G>> {
-        let count = u32::read(&mut reader)?;
-        let mut comm_key = vec![];
-        for _ in 0..count {
-            comm_key.push(G::read(&mut reader)?);
-        }
-        let h = G::read(&mut reader)?;
-        let s = G::read(&mut reader)?;
-        let max_degree = u8::read(&mut reader)? as usize;
-        Ok(CommitterKey::<G>{
-            comm_key,
-            h,
-            s,
-            max_degree,
-        })
     }
 }
 
@@ -124,12 +98,12 @@ impl<G: AffineCurve> PCPreparedVerifierKey<VerifierKey<G>> for PreparedVerifierK
 /// Commitment to a polynomial that optionally enforces a degree bound.
 #[derive(Derivative)]
 #[derivative(
-Default(bound = ""),
-Hash(bound = ""),
-Clone(bound = ""),
-Debug(bound = ""),
-PartialEq(bound = ""),
-Eq(bound = "")
+    Default(bound = ""),
+    Hash(bound = ""),
+    Clone(bound = ""),
+    Debug(bound = ""),
+    PartialEq(bound = ""),
+    Eq(bound = "")
 )]
 pub struct Commitment<G: AffineCurve> {
     /// A Pedersen commitment to the polynomial.
@@ -139,6 +113,47 @@ pub struct Commitment<G: AffineCurve> {
     /// This is `none` if the committed polynomial does not
     /// enforce a strict degree bound.
     pub shifted_comm: Option<G>,
+}
+
+impl<G: AffineCurve> CanonicalSerialize for Commitment<G>
+{
+    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError>
+    {
+        // More than enough for practical applications
+        let len = u8::try_from(self.comm.len()).map_err(|_| SerializationError::NotEnoughSpace)?;
+        CanonicalSerialize::serialize(&len, &mut writer)?;
+
+        // Save only one of the coordinates of the point and one byte of flags in order
+        // to be able to reconstruct the other coordinate
+        for c in self.comm.iter() {
+            CanonicalSerialize::serialize(c, &mut writer)?;
+        }
+
+        CanonicalSerialize::serialize(&self.shifted_comm, &mut writer)
+    }
+
+    fn serialized_size(&self) -> usize {
+        1
+            + self.comm.len() * self.comm[0].serialized_size()
+            + self.shifted_comm.serialized_size()
+    }
+}
+
+impl<G: AffineCurve> CanonicalDeserialize for Commitment<G> {
+    fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // Read comm
+        let len: u8 = CanonicalDeserialize::deserialize(&mut reader)?;
+        let mut comm = Vec::with_capacity(len as usize);
+        for _ in 0..(len as usize) {
+            let c: G = CanonicalDeserialize::deserialize(&mut reader)?;
+            comm.push(c);
+        }
+
+        // Read shifted comm
+        let shifted_comm: Option<G> = CanonicalDeserialize::deserialize(&mut reader)?;
+
+        Ok(Self { comm, shifted_comm })
+    }
 }
 
 impl<G: AffineCurve> PCCommitment for Commitment<G> {
@@ -152,31 +167,6 @@ impl<G: AffineCurve> PCCommitment for Commitment<G> {
 
     fn has_degree_bound(&self) -> bool {
         false
-    }
-
-    fn size_in_bytes(&self) -> usize {
-        (to_bytes![G::zero()].unwrap().len() / 2) * self.comm.len()
-    }
-}
-
-impl<G: AffineCurve> ToBytes for Commitment<G> {
-    #[inline]
-    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        self.comm.write(&mut writer)?;
-        self.shifted_comm.write(&mut writer)?;
-        Ok(())
-    }
-}
-
-impl<G: AffineCurve> FromBytes for Commitment<G> {
-    #[inline]
-    fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<Commitment<G>> {
-        let comm = G::read(&mut reader)?;
-        let shifted_comm = Option::<G>::read(&mut reader)?;
-        Ok(Commitment::<G>{
-            comm,
-            shifted_comm
-        })
     }
 }
 
@@ -193,13 +183,14 @@ impl<G: AffineCurve> PCPreparedCommitment<Commitment<G>> for PreparedCommitment<
 /// `Randomness` hides the polynomial inside a commitment and is outputted by `InnerProductArg::commit`.
 #[derive(Derivative)]
 #[derivative(
-Default(bound = ""),
-Hash(bound = ""),
-Clone(bound = ""),
-Debug(bound = ""),
-PartialEq(bound = ""),
-Eq(bound = "")
+    Default(bound = ""),
+    Hash(bound = ""),
+    Clone(bound = ""),
+    Debug(bound = ""),
+    PartialEq(bound = ""),
+    Eq(bound = "")
 )]
+#[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct Randomness<G: AffineCurve> {
     /// Randomness is some scalar field element.
     pub rand: Vec<G::ScalarField>,
@@ -228,36 +219,15 @@ impl<G: AffineCurve> PCRandomness for Randomness<G> {
     }
 }
 
-impl<G: AffineCurve> ToBytes for Randomness<G>
-{
-    #[inline]
-    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        self.rand.write(&mut writer)?;
-        self.shifted_rand.write(&mut writer)?;
-        Ok(())
-    }
-}
-
-impl<G: AffineCurve> FromBytes for Randomness<G>
-{
-    #[inline]
-    fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<Randomness<G>> {
-        let rand = G::ScalarField::read(&mut reader)?;
-        let shifted_rand = Option::<G::ScalarField>::read(&mut reader)?;
-        Ok(Randomness::<G>{
-            rand,
-            shifted_rand
-        })
-    }
-}
-
 /// `Proof` is an evaluation proof that is output by `InnerProductArg::open`.
 #[derive(Derivative)]
 #[derivative(
 Default(bound = ""),
 Hash(bound = ""),
 Clone(bound = ""),
-Debug(bound = "")
+Debug(bound = ""),
+Eq(bound = ""),
+PartialEq(bound = ""),
 )]
 pub struct Proof<G: AffineCurve> {
     /// Vector of left elements for each of the log_d iterations in `open`
@@ -281,55 +251,74 @@ pub struct Proof<G: AffineCurve> {
     pub rand: Option<G::ScalarField>,
 }
 
-impl<G: AffineCurve> PCProof for Proof<G> {
-    fn size_in_bytes(&self) -> usize {
-        to_bytes![self].unwrap().len()
+impl<G: AffineCurve> CanonicalSerialize for Proof<G> {
+    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+
+        // l_vec
+        // More than enough for practical applications
+        let l_vec_len = u8::try_from(self.l_vec.len()).map_err(|_| SerializationError::NotEnoughSpace)?;
+        CanonicalSerialize::serialize(&l_vec_len, &mut writer)?;
+
+        // Save only one of the coordinates of the point and one byte of flags in order
+        // to be able to reconstruct the other coordinate
+        for p in self.l_vec.iter() {
+            CanonicalSerialize::serialize(p, &mut writer)?;
+        }
+
+        // r_vec
+        // More than enough for practical applications
+        let r_vec_len = u8::try_from(self.r_vec.len()).map_err(|_| SerializationError::NotEnoughSpace)?;
+        CanonicalSerialize::serialize(&r_vec_len, &mut writer)?;
+
+        // Save only one of the coordinates of the point and one byte of flags in order
+        // to be able to reconstruct the other coordinate
+        for p in self.r_vec.iter() {
+            CanonicalSerialize::serialize(p, &mut writer)?;
+        }
+
+        // Serialize the other fields
+        CanonicalSerialize::serialize(&self.final_comm_key, &mut writer)?;
+        CanonicalSerialize::serialize(&self.c, &mut writer)?;
+        CanonicalSerialize::serialize(&self.hiding_comm, &mut writer)?;
+        CanonicalSerialize::serialize(&self.rand, &mut writer)
+    }
+
+    fn serialized_size(&self) -> usize {
+        1 + self.l_vec.iter().map(|item| item.serialized_size()).sum::<usize>()
+            + 1 + self.r_vec.iter().map(|item| item.serialized_size()).sum::<usize>()
+            + self.final_comm_key.serialized_size()
+            + self.c.serialized_size()
+            + self.hiding_comm.serialized_size()
+            + self.rand.serialized_size()
     }
 }
 
-impl<G: AffineCurve> ToBytes for Proof<G> {
-    #[inline]
-    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        (self.l_vec.len() as u32).write(&mut writer)?;
-        for item in self.l_vec.iter() {
-            item.write(&mut writer)?;
-        }
-        (self.r_vec.len() as u32).write(&mut writer)?;
-        for item in self.r_vec.iter() {
-            item.write(&mut writer)?;
-        }
-        self.final_comm_key.write(&mut writer)?;
-        self.c.write(&mut writer)?;
-        self.hiding_comm.write(&mut writer)?;
-        self.rand.write(&mut writer)
-    }
-}
+impl<G: AffineCurve> CanonicalDeserialize for Proof<G> {
+    fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
 
-impl<G: AffineCurve> FromBytes for Proof<G> {
-    #[inline]
-    fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<Proof<G>> {
-        let mut l_vec = vec![];
-        let count = u32::read(&mut reader)? as usize;
-        for _ in 0..count {
-            l_vec.push(G::read(&mut reader)?);
+        // Read l_vec
+        let l_vec_len: u8 = CanonicalDeserialize::deserialize(&mut reader)?;
+        let mut l_vec = Vec::with_capacity(l_vec_len as usize);
+        for _ in 0..(l_vec_len as usize) {
+            let c: G = CanonicalDeserialize::deserialize(&mut reader)?;
+            l_vec.push(c);
         }
-        let mut r_vec = vec![];
-        let count = u32::read(&mut reader)? as usize;
-        for _ in 0..count {
-            r_vec.push(G::read(&mut reader)?);
+
+        // Read r_vec
+        let r_vec_len: u8 = CanonicalDeserialize::deserialize(&mut reader)?;
+        let mut r_vec = Vec::with_capacity(r_vec_len as usize);
+        for _ in 0..(r_vec_len as usize) {
+            let c: G = CanonicalDeserialize::deserialize(&mut reader)?;
+            r_vec.push(c);
         }
-        let final_comm_key = G::read(&mut reader)?;
-        let c = G::ScalarField::read(&mut reader)?;
-        let hiding_comm = Option::<G>::read(&mut reader)?;
-        let rand = Option::<G::ScalarField>::read(&mut reader)?;
-        Ok(Proof::<G>{
-            l_vec,
-            r_vec,
-            final_comm_key,
-            c,
-            hiding_comm,
-            rand
-        })
+
+        // Read other fields
+        let final_comm_key: G = CanonicalDeserialize::deserialize(&mut reader)?;
+        let c: G::ScalarField = CanonicalDeserialize::deserialize(&mut reader)?;
+        let hiding_comm: Option<G> = CanonicalDeserialize::deserialize(&mut reader)?;
+        let rand: Option<G::ScalarField> = CanonicalDeserialize::deserialize(&mut reader)?;
+
+        Ok(Self { l_vec, r_vec, final_comm_key, c, hiding_comm, rand })
     }
 }
 
@@ -341,7 +330,9 @@ impl<G: AffineCurve> FromBytes for Proof<G> {
 Default(bound = ""),
 Hash(bound = ""),
 Clone(bound = ""),
-Debug(bound = "")
+Debug(bound = ""),
+Eq(bound = ""),
+PartialEq(bound = ""),
 )]
 pub struct BatchProof<G: AffineCurve> {
 
@@ -356,18 +347,68 @@ pub struct BatchProof<G: AffineCurve> {
     pub batch_values: BTreeMap<String, G::ScalarField>
 }
 
-impl<G: AffineCurve> BatchPCProof for BatchProof<G> {
-    fn size_in_bytes(&self) -> usize {
-        to_bytes![self].unwrap().len()
+impl<G: AffineCurve> CanonicalSerialize for BatchProof<G> {
+    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+
+        // Serialize proof
+        CanonicalSerialize::serialize(&self.proof, &mut writer)?;
+
+        // Serialize batch_commitment
+        // More than enough for practical applications
+        let batch_commitment_len = u8::try_from(self.batch_commitment.len()).map_err(|_| SerializationError::NotEnoughSpace)?;
+        CanonicalSerialize::serialize(&batch_commitment_len, &mut writer)?;
+
+        // Save only one of the coordinates of the point and one byte of flags in order
+        // to be able to reconstruct the other coordinate
+        for comm in self.batch_commitment.iter() {
+            CanonicalSerialize::serialize(comm, &mut writer)?;
+        }
+
+        // Serialize batch values
+        // More than enough for practical applications
+        let batch_values_len = u8::try_from(self.batch_values.len()).map_err(|_| SerializationError::NotEnoughSpace)?;
+        CanonicalSerialize::serialize(&batch_values_len, &mut writer)?;
+        for (k, v) in self.batch_values.iter() {
+            CanonicalSerialize::serialize(k, &mut writer)?;
+            CanonicalSerialize::serialize(v, &mut writer)?;
+        }
+
+        Ok(())
+    }
+
+    fn serialized_size(&self) -> usize {
+        self.proof.serialized_size()
+            + 1
+            + self.batch_commitment.iter().map(|item| item.serialized_size()).sum::<usize>()
+            + 1
+            + self.batch_values.iter().map(|(k, v)| k.serialized_size() + v.serialized_size()).sum::<usize>()
     }
 }
 
-impl<G: AffineCurve> ToBytes for BatchProof<G> {
-    #[inline]
-    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        self.proof.write(&mut writer)?;
-        self.batch_commitment.write(&mut writer)?;
-        self.batch_values.values().collect::<Vec<&G::ScalarField>>().write(&mut writer)
+impl<G: AffineCurve> CanonicalDeserialize for BatchProof<G> {
+    fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+
+        // Read proof
+        let proof: Proof<G> = CanonicalDeserialize::deserialize(&mut reader)?;
+
+        // Read batch commitment
+        let batch_commitment_len: u8 = CanonicalDeserialize::deserialize(&mut reader)?;
+        let mut batch_commitment = Vec::with_capacity(batch_commitment_len as usize);
+        for _ in 0..(batch_commitment_len as usize) {
+            let comm: G = CanonicalDeserialize::deserialize(&mut reader)?;
+            batch_commitment.push(comm);
+        }
+
+        // Read batch values
+        let batch_values_len: u8 = CanonicalDeserialize::deserialize(&mut reader)?;
+        let mut batch_values = BTreeMap::new();
+        for _ in 0..(batch_values_len as usize) {
+            let k: String = CanonicalDeserialize::deserialize(&mut reader)?;
+            let v: G::ScalarField = CanonicalDeserialize::deserialize(&mut reader)?;
+            batch_values.insert(k, v);
+        }
+
+        Ok(Self { proof, batch_commitment, batch_values })
     }
 }
 

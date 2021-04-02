@@ -1,5 +1,7 @@
 use crate::{Rc, String, Vec};
-use algebra::Field;
+use algebra::{
+    Field, serialize::{CanonicalSerialize, CanonicalDeserialize},
+};
 pub use algebra_utils::DensePolynomial as Polynomial;
 use std::borrow::Borrow;
 use std::ops::{AddAssign, MulAssign, SubAssign};
@@ -10,14 +12,18 @@ pub type PolynomialLabel = String;
 
 /// Defines the minimal interface for public params for any polynomial
 /// commitment scheme.
-pub trait PCUniversalParams: Clone + std::fmt::Debug {
+pub trait PCUniversalParams:
+    Clone + std::fmt::Debug + CanonicalSerialize + CanonicalDeserialize
+{
     /// Outputs the maximum degree supported by the committer key.
     fn max_degree(&self) -> usize;
 }
 
 /// Defines the minimal interface of committer keys for any polynomial
 /// commitment scheme.
-pub trait PCCommitterKey: Clone + std::fmt::Debug + Eq + PartialEq {
+pub trait PCCommitterKey:
+    Clone + std::fmt::Debug + Eq + PartialEq + CanonicalSerialize + CanonicalDeserialize
+{
     /// Outputs the maximum degree supported by the universal parameters
     /// `Self` was derived from.
     fn max_degree(&self) -> usize;
@@ -28,7 +34,9 @@ pub trait PCCommitterKey: Clone + std::fmt::Debug + Eq + PartialEq {
 
 /// Defines the minimal interface of verifier keys for any polynomial
 /// commitment scheme.
-pub trait PCVerifierKey: Clone + std::fmt::Debug + Eq + PartialEq {
+pub trait PCVerifierKey:
+    Clone + std::fmt::Debug + Eq + PartialEq + CanonicalSerialize + CanonicalDeserialize
+{
     /// Outputs the maximum degree supported by the universal parameters
     /// `Self` was derived from.
     fn max_degree(&self) -> usize;
@@ -46,15 +54,13 @@ pub trait PCPreparedVerifierKey<Unprepared: PCVerifierKey> {
 
 /// Defines the minimal interface of commitments for any polynomial
 /// commitment scheme.
-pub trait PCCommitment: Clone + algebra::ToBytes {
+pub trait PCCommitment: Clone + CanonicalSerialize + CanonicalDeserialize
+{
     /// Outputs a non-hiding commitment to the zero polynomial.
     fn empty() -> Self;
 
     /// Does this commitment have a degree bound?
     fn has_degree_bound(&self) -> bool;
-
-    /// Size in bytes
-    fn size_in_bytes(&self) -> usize;
 }
 
 /// Defines the minimal interface of prepared commitments for any polynomial
@@ -66,7 +72,7 @@ pub trait PCPreparedCommitment<UNPREPARED: PCCommitment>: Clone {
 
 /// Defines the minimal interface of commitment randomness for any polynomial
 /// commitment scheme.
-pub trait PCRandomness: Clone + algebra::ToBytes + algebra::FromBytes {
+pub trait PCRandomness: Clone + CanonicalSerialize + CanonicalDeserialize {
     /// Outputs empty randomness that does not hide the commitment.
     fn empty(segments_count: usize) -> Self;
 
@@ -75,20 +81,6 @@ pub trait PCRandomness: Clone + algebra::ToBytes + algebra::FromBytes {
     /// `has_degree_bound` indicates that the corresponding commitment has an enforced
     /// strict degree bound.
     fn rand<R: RngCore>(num_queries: usize, has_degree_bound: bool, rng: &mut R) -> Self;
-}
-
-/// Defines the minimal interface of evaluation proofs for any polynomial
-/// commitment scheme.
-pub trait PCProof: Clone + algebra::ToBytes + algebra::FromBytes {
-    /// Size in bytes
-    fn size_in_bytes(&self) -> usize;
-}
-
-/// Defines the minimal interface of evaluation proofs for any polynomial
-/// batch commitment scheme.
-pub trait BatchPCProof: Clone + algebra::ToBytes {
-    /// Size in bytes
-    fn size_in_bytes(&self) -> usize;
 }
 
 /// A polynomial along with information about its degree bound (if any), and the
@@ -157,42 +149,6 @@ impl<'a, F: Field> LabeledPolynomial<F> {
     }
 }
 
-impl<F: Field> algebra::ToBytes for LabeledPolynomial<F>  {
-    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        let buf = self.label.as_bytes().to_vec();
-        (buf.len() as u8).write(&mut writer)?;
-        for item in buf.iter() {
-            item.write(&mut writer)?;
-        }
-        (*self.polynomial).write(&mut writer)?;
-        self.degree_bound.and_then(|v| Some(v as u32)).write(&mut writer)?;
-        self.hiding_bound.and_then(|v| Some(v as u32)).write(&mut writer)?;
-        Ok(())
-    }
-}
-
-impl<F: Field> algebra::FromBytes for LabeledPolynomial<F> {
-    #[inline]
-    fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<LabeledPolynomial<F>> {
-        let mut buf = vec![];
-        let count = u8::read(&mut reader)?;
-        for _ in 0..count {
-            buf.push(u8::read(&mut reader)?);
-        }
-        let label = String::from_utf8(buf)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let polynomial = Polynomial::<F>::read(&mut reader)?;
-        let degree_bound = Option::<u32>::read(&mut reader)?.and_then(|v| Some(v as usize));
-        let hiding_bound = Option::<u32>::read(&mut reader)?.and_then(|v| Some(v as usize));
-        Ok(LabeledPolynomial::<F>{
-            label,
-            polynomial: Rc::new(polynomial),
-            degree_bound,
-            hiding_bound
-        })
-    }
-}
-
 /// A commitment along with information about its degree bound (if any).
 #[derive(Clone)]
 pub struct LabeledCommitment<C: PCCommitment> {
@@ -224,14 +180,6 @@ impl<C: PCCommitment> LabeledCommitment<C> {
     /// Retrieve the degree bound in `self`.
     pub fn degree_bound(&self) -> Option<usize> {
         self.degree_bound
-    }
-}
-
-impl<C: PCCommitment> algebra::ToBytes for LabeledCommitment<C> {
-    #[inline]
-    fn write<W: std::io::Write>(&self, mut w: W) -> std::io::Result<()> {
-        self.commitment.write(&mut w)?;
-        Ok(())
     }
 }
 

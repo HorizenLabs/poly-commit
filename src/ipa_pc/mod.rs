@@ -14,8 +14,8 @@ pub use data_structures::*;
 
 use rayon::prelude::*;
 
-#[cfg(feature = "gpu")]
-use algebra_kernels::polycommit::{get_kernels, get_gpu_min_length};
+//#[cfg(feature = "gpu")]
+//use algebra_kernels::polycommit::{get_kernels, get_gpu_min_length};
 
 use digest::Digest;
 
@@ -69,7 +69,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         while challenge.is_none() {
             let hash_input = to_bytes![bytes, i].unwrap();
             let hash = D::digest(&hash_input);
-            challenge = <G::ScalarField as PrimeField>::from_random_bytes(&hash);
+            challenge = <G::ScalarField as Field>::from_random_bytes(&hash);
 
             i += 1;
         }
@@ -675,7 +675,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         k_l: &mut [G::Projective],
         k_r: &[G],
     ) {
-        #[cfg(feature = "gpu")]
+        /*#[cfg(feature = "gpu")]
         if get_gpu_min_length() <= k_l.len() {
             match get_kernels() {
                 Ok(kernels) => {
@@ -698,7 +698,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
                 }
             }
             return;
-        }
+        }*/
 
         c_l.par_iter_mut()
             .zip(c_r)
@@ -1701,8 +1701,6 @@ mod tests {
 
     use super::InnerProductArgPC;
 
-    use algebra::fields::tweedle::Fr;
-
     use algebra::curves::tweedle::dee::{
         Affine, Projective,
     };
@@ -1815,13 +1813,6 @@ mod tests {
         use crate::tests::*;
         bad_degree_bound_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
-    }
-
-    #[test]
-    fn serialization_test() {
-        use crate::tests::*;
-        serialization_test::<Fr>().expect("test failed for tweedle_fr");
-        println!("Finished tweedle_fr");
     }
 
     #[test]

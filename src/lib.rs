@@ -14,9 +14,11 @@ extern crate derivative;
 #[macro_use]
 extern crate bench_utils;
 
-use algebra::Field;
+use algebra::{
+    Field,
+    serialize::*,
+};
 pub use algebra_utils::fft::DensePolynomial as Polynomial;
-use std::iter::FromIterator;
 use rand_core::RngCore;
 
 use std::{
@@ -24,6 +26,8 @@ use std::{
     rc::Rc,
     string::{String, ToString},
     vec::Vec,
+    fmt::Debug,
+    iter::FromIterator
 };
 
 /// Data structures used by a polynomial commitment scheme.
@@ -59,56 +63,12 @@ pub type QuerySet<'a, F> = BTreeSet<(String, (String, F))>;
 pub type Evaluations<'a, F> = BTreeMap<(String, F), F>;
 
 /// A proof of satisfaction of linear combinations.
-#[derive(Clone)]
+#[derive(Clone, CanonicalSerialize, CanonicalDeserialize)]
 pub struct BatchLCProof<F: Field, PC: PolynomialCommitment<F>> {
     /// Evaluation proof.
     pub proof: PC::BatchProof,
     /// Evaluations required to verify the proof.
     pub evals: Option<Vec<F>>,
-}
-
-impl<F: Field, PC: PolynomialCommitment<F>> algebra::ToBytes for BatchLCProof<F, PC> {
-    #[inline]
-    fn write<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        let buf = self.proof.clone().into();
-        (buf.len() as u32).write(&mut writer)?;
-        for item in buf.iter() {
-            item.write(&mut writer)?;
-        }
-        self.evals.as_ref().and_then(|v| Some(v.len() as u32)).write(&mut writer)?;
-        if let Some(evals) = &self.evals {
-            for item in evals {
-                item.write(&mut writer)?;
-            }
-        }
-        Ok(())
-    }
-}
-
-impl<F: Field, PC: PolynomialCommitment<F>> algebra::FromBytes for BatchLCProof<F, PC> {
-    #[inline]
-    fn read<Read: std::io::Read>(mut reader: Read) -> std::io::Result<BatchLCProof<F, PC>> {
-        let count = u32::read(&mut reader)? as usize;
-        let mut res = vec![];
-        for _ in 0..count {
-            res.push(PC::Proof::read(&mut reader)?);
-        }
-        let proof = PC::BatchProof::from(res);
-        let count = Option::<u32>::read(&mut reader)?;
-        let evals = if let Some(count) = count {
-            let mut res = vec![];
-            for _ in 0..count as usize {
-                res.push(F::read(&mut reader).unwrap());
-            }
-            Some(res)
-        } else {
-            None
-        };
-        Ok(BatchLCProof::<F, PC> {
-            proof,
-            evals
-        })
-    }
 }
 
 /// Describes the interface for a polynomial commitment scheme that allows
@@ -121,21 +81,21 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     type UniversalParams: PCUniversalParams;
     /// The committer key for the scheme; used to commit to a polynomial and then
     /// open the commitment to produce an evaluation proof.
-    type CommitterKey: PCCommitterKey + algebra::FromBytes + algebra::ToBytes;
+    type CommitterKey: PCCommitterKey;
     /// The verifier key for the scheme; used to check an evaluation proof.
-    type VerifierKey: PCVerifierKey + algebra::FromBytes + algebra::ToBytes;
+    type VerifierKey: PCVerifierKey;
     /// The prepared verifier key for the scheme; used to check an evaluation proof.
     type PreparedVerifierKey: PCPreparedVerifierKey<Self::VerifierKey> + Clone;
     /// The commitment to a polynomial.
-    type Commitment: PCCommitment + Default + algebra::FromBytes + algebra::ToBytes;
+    type Commitment: PCCommitment + Default + Debug + Eq + PartialEq;
     /// The prepared commitment to a polynomial.
     type PreparedCommitment: PCPreparedCommitment<Self::Commitment>;
     /// The commitment randomness.
     type Randomness: PCRandomness;
     /// The evaluation proof for a single point.
-    type Proof: PCProof + Clone;
+    type Proof: Clone + Debug + Eq + PartialEq + CanonicalSerialize + CanonicalDeserialize;
     /// The evaluation proof for a query set.
-    type BatchProof: BatchPCProof + Clone;
+    type BatchProof: Clone + Debug + Eq + PartialEq + CanonicalSerialize + CanonicalDeserialize;
     /// The error type for the scheme.
     type Error: std::error::Error + From<Error>;
 
@@ -552,6 +512,7 @@ pub mod tests {
     use crate::*;
     use algebra::Field;
     use rand::{distributions::Distribution, Rng, thread_rng};
+    use std::io::Cursor;
 
     #[derive(Copy, Clone, Default)]
     struct TestInfo {
@@ -563,6 +524,40 @@ pub mod tests {
         max_num_queries: usize,
         num_equations: Option<usize>,
         segmented: bool
+    }
+
+    pub fn serialization_deserialization_test<F, PC>(a: &PC::BatchProof)
+        where
+            F: Field,
+            PC: PolynomialCommitment<F>,
+    {
+        let buf_size = a.serialized_size();
+        {
+            let mut serialized = vec![0; buf_size];
+            let mut cursor = Cursor::new(&mut serialized[..]);
+            CanonicalSerialize::serialize(a, &mut cursor).unwrap();
+
+            let mut cursor = Cursor::new(&serialized[..]);
+            let b = <PC::BatchProof as CanonicalDeserialize>::deserialize(&mut cursor).unwrap();
+            assert_eq!(a, &b);
+        }
+
+        {
+            let serialized = vec![0; buf_size - 1];
+            let mut cursor = Cursor::new(&serialized[..]);
+            <PC::BatchProof as CanonicalDeserialize>::deserialize(&mut cursor).unwrap_err();
+        }
+
+        {
+            let mut serialized = vec![0; a.uncompressed_size()];
+            let mut cursor = Cursor::new(&mut serialized[..]);
+            a.serialize_uncompressed(&mut cursor).unwrap();
+
+            let mut cursor = Cursor::new(&serialized[..]);
+            let b = <PC::BatchProof as CanonicalDeserialize>::deserialize_uncompressed(&mut cursor).unwrap();
+            assert_eq!(a, &b);
+        }
+
     }
 
     pub fn bad_degree_bound_test<F, PC>() -> Result<(), PC::Error>
@@ -637,6 +632,9 @@ pub mod tests {
                 &rands,
                 Some(rng),
             )?;
+
+            serialization_deserialization_test::<F, PC>(&proof);
+
             let result = PC::batch_check(
                 &vk,
                 &comms,
@@ -782,6 +780,8 @@ pub mod tests {
                 &rands,
                 Some(rng),
             )?;
+
+            serialization_deserialization_test::<F, PC>(&proof);
 
             let result = PC::batch_check(
                 &vk,
@@ -1218,28 +1218,5 @@ pub mod tests {
             segmented: false,
         };
         equation_test_template::<F, PC>(info)
-    }
-
-    pub fn serialization_test<F>() -> Result<(), Error>
-    where
-        F: Field,
-    {
-        use algebra::{FromBytes, ToBytes};
-        let rng = &mut thread_rng();
-        for i in 0..100 {
-            let label = format!("Test{}", i);
-            let poly = Polynomial::<F>::rand(1 << 10, rng);
-            let l_poly = LabeledPolynomial::new(
-                label,
-                poly,
-                Some(2),
-                Some(2),
-            );
-            let mut buffer = vec![];
-            l_poly.write(&mut buffer).unwrap();
-            let l_poly_check = LabeledPolynomial::<F>::read(buffer.clone().as_slice()).unwrap();
-            assert_eq!(l_poly, l_poly_check);
-        }
-        Ok(())
     }
 }
