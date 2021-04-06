@@ -348,7 +348,23 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     ) -> Result<(), Error> {
 
         if let Some(bound) = p.degree_bound() {
+
+            let p_len = p.polynomial().coeffs.len();
+            let segment_len = supported_degree + 1;
+            let segments_count = std::cmp::max(1, p_len / segment_len + if p_len % segment_len != 0 { 1 } else { 0 });
+
             if bound < p.degree() {
+                return Err(Error::IncorrectDegreeBound {
+                    poly_degree: p.degree(),
+                    degree_bound: bound,
+                    supported_degree,
+                    label: p.label().to_string(),
+                });
+            }
+
+            if (bound + 1) <= (segments_count-1) * segment_len ||
+                (bound + 1) > segments_count * segment_len
+            {
                 return Err(Error::IncorrectDegreeBound {
                     poly_degree: p.degree(),
                     degree_bound: bound,
