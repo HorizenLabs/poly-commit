@@ -126,6 +126,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
             let degree_bound = labeled_commitment.degree_bound();
 
+            // If the degree_bound is a multiple of the key_len then there is no need to prove the degree bound polynomial identity.
             let degree_bound_len = degree_bound.and_then(|degree_bound_len| {
                 if (degree_bound_len + 1) % key_len != 0 { Some(degree_bound_len + 1) } else { None }
             });
@@ -711,6 +712,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             let p_len = polynomial.coeffs.len();
             let segments_count = std::cmp::max(1, p_len / key_len + if p_len % key_len != 0 { 1 } else { 0 });
 
+            // If the degree_bound is a multiple of the key_len then there is no need to prove the degree bound polynomial identity.
             let degree_bound_len = degree_bound.and_then(|degree_bound| {
                 if (degree_bound + 1) % key_len != 0 { Some(degree_bound + 1) } else { None }
             });
@@ -1083,12 +1085,11 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         // h(X) polynomial added to the set of polynomials for multi-poly single-point batching
         let mut labeled_polynomials = labeled_polynomials;
-        let batch_degree = batch_polynomial.degree();
         let labeled_batch_polynomial = LabeledPolynomial::new(
             format!("Batch"),
             batch_polynomial,
             None,
-            if has_hiding { Some(batch_degree) } else { None }
+            if has_hiding { Some(1) } else { None }
         );
         labeled_polynomials.push(&labeled_batch_polynomial);
 
