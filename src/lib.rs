@@ -659,11 +659,17 @@ pub mod tests {
             };
             println!("Degree bound: {:?}", degree_bound);
 
-            let hiding_bound = if num_points_in_query_set >= degree {
-                Some(degree)
+            let hiding_bound;
+            let range = rand::distributions::Uniform::from(0..=1);
+            if range.sample(rng) > 0 {
+                hiding_bound = if num_points_in_query_set >= degree {
+                    Some(degree)
+                } else {
+                    Some(num_points_in_query_set)
+                };
             } else {
-                Some(num_points_in_query_set)
-            };
+                hiding_bound = None;
+            }
             println!("Hiding bound: {:?}", hiding_bound);
 
             polynomials.push(LabeledPolynomial::new(
