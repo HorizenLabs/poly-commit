@@ -284,7 +284,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         return commitments;
     }
 
-    fn sample_generators(num_generators: usize) -> Vec<G> {
+    /// Samples vector of generators using PROTOCOL_NAME
+    pub fn sample_generators(num_generators: usize) -> Vec<G> {
         let generators: Vec<_> = (0..num_generators).into_par_iter()
             .map(|i| {
                 let i = i as u64;
