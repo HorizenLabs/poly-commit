@@ -283,7 +283,7 @@ impl<G: AffineCurve> ToBytes for BatchProof<G> {
 /// `SuccinctCheckPolynomial` is a succinctly-representated polynomial
 /// generated from the `log_d` random oracle challenges generated in `open`.
 /// It has the special property that can be evaluated in `O(log_d)` time.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SuccinctCheckPolynomial<F: PrimeField>(pub Vec<F>);
 
 impl<F: PrimeField> SuccinctCheckPolynomial<F> {
