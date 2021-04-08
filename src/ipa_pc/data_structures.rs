@@ -66,7 +66,7 @@ impl<G: AffineCurve> ToBytes for CommitterKey<G> {
         }
         self.h.write(&mut writer)?;
         self.s.write(&mut writer)?;
-        (self.max_degree as u8).write(&mut writer)
+        (self.max_degree as u32).write(&mut writer)
     }
 }
 
@@ -80,7 +80,7 @@ impl<G: AffineCurve> FromBytes for CommitterKey<G> {
         }
         let h = G::read(&mut reader)?;
         let s = G::read(&mut reader)?;
-        let max_degree = u8::read(&mut reader)? as usize;
+        let max_degree = u32::read(&mut reader)? as usize;
         Ok(CommitterKey::<G>{
             comm_key,
             h,
