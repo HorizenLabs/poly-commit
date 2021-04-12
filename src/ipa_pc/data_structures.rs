@@ -10,7 +10,7 @@ use rand_core::RngCore;
 
 /// `UniversalParams` are the universal parameters for the inner product arg scheme.
 #[derive(Derivative)]
-#[derivative(Default(bound = ""), Clone(bound = ""), Debug(bound = ""))]
+#[derivative(Default(bound = ""), Clone(bound = ""), Debug(bound = ""), Eq(bound = ""), PartialEq(bound = ""))]
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct UniversalParams<G: AffineCurve> {
     /// The key used to commit to polynomials.
@@ -170,6 +170,23 @@ impl<G: AffineCurve> PCCommitment for Commitment<G> {
     }
 }
 
+impl<G: AffineCurve> algebra::ToBytes for Commitment<G> {
+    #[inline]
+    fn write<W: Write>(&self, writer: W) -> std::io::Result<()> {
+        use std::io::{Error, ErrorKind};
+
+        self.serialize_uncompressed(writer)
+            .map_err(|e| Error::new(ErrorKind::Other, format!{"{:?}", e}))
+    }
+}
+
+impl<G: AffineCurve> SemanticallyValid for Commitment<G> {
+    fn is_valid(&self) -> bool {
+        self.comm.is_valid() &&
+            if self.shifted_comm.is_some() { self.shifted_comm.as_ref().unwrap().is_valid() } else { true }
+    }
+}
+
 /// Nothing to do to prepare this commitment (for now).
 pub type PreparedCommitment<E> = Commitment<E>;
 
@@ -222,12 +239,12 @@ impl<G: AffineCurve> PCRandomness for Randomness<G> {
 /// `Proof` is an evaluation proof that is output by `InnerProductArg::open`.
 #[derive(Derivative)]
 #[derivative(
-Default(bound = ""),
-Hash(bound = ""),
-Clone(bound = ""),
-Debug(bound = ""),
-Eq(bound = ""),
-PartialEq(bound = ""),
+    Default(bound = ""),
+    Hash(bound = ""),
+    Clone(bound = ""),
+    Debug(bound = ""),
+    Eq(bound = ""),
+    PartialEq(bound = ""),
 )]
 pub struct Proof<G: AffineCurve> {
     /// Vector of left elements for each of the log_d iterations in `open`
@@ -249,6 +266,17 @@ pub struct Proof<G: AffineCurve> {
     /// to the opened polynomials, along with the randomness used for the
     /// commitment to the hiding polynomial.
     pub rand: Option<G::ScalarField>,
+}
+
+impl<G: AffineCurve> SemanticallyValid for Proof<G> {
+    fn is_valid(&self) -> bool {
+        self.l_vec.is_valid() &&
+            self.r_vec.is_valid() &&
+            self.final_comm_key.is_valid() &&
+            self.c.is_valid() &&
+            if self.hiding_comm.is_some() { self.hiding_comm.as_ref().unwrap().is_valid() } else { true } &&
+            if self.rand.is_some() { self.rand.as_ref().unwrap().is_valid() } else { true }
+    }
 }
 
 impl<G: AffineCurve> CanonicalSerialize for Proof<G> {
@@ -345,6 +373,14 @@ pub struct BatchProof<G: AffineCurve> {
 
     /// Values: v_i = p(x_i), where the query points x_i are not necessarily distinct.
     pub batch_values: BTreeMap<String, G::ScalarField>
+}
+
+impl<G: AffineCurve> SemanticallyValid for BatchProof<G> {
+    fn is_valid(&self) -> bool {
+        self.proof.is_valid() &&
+            self.batch_commitment.is_valid() &&
+            self.batch_values.iter().all(|(_, v)| v.is_valid())
+    }
 }
 
 impl<G: AffineCurve> CanonicalSerialize for BatchProof<G> {

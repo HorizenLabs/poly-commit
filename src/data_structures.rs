@@ -1,10 +1,9 @@
 use crate::{Rc, String, Vec};
-use algebra::{
-    Field, serialize::{CanonicalSerialize, CanonicalDeserialize},
-};
+use algebra::{Field, serialize::{CanonicalSerialize, CanonicalDeserialize, SerializationError}, SemanticallyValid};
 pub use algebra_utils::DensePolynomial as Polynomial;
 use std::borrow::Borrow;
 use std::ops::{AddAssign, MulAssign, SubAssign};
+use std::io::{Read, Write, Error as IoError, ErrorKind, Result as IoResult};
 use rand_core::RngCore;
 
 /// Labels a `LabeledPolynomial` or a `LabeledCommitment`.
@@ -13,7 +12,7 @@ pub type PolynomialLabel = String;
 /// Defines the minimal interface for public params for any polynomial
 /// commitment scheme.
 pub trait PCUniversalParams:
-    Clone + std::fmt::Debug + CanonicalSerialize + CanonicalDeserialize
+    Clone + std::fmt::Debug + CanonicalSerialize + CanonicalDeserialize + Eq + PartialEq
 {
     /// Outputs the maximum degree supported by the committer key.
     fn max_degree(&self) -> usize;
@@ -54,7 +53,12 @@ pub trait PCPreparedVerifierKey<Unprepared: PCVerifierKey> {
 
 /// Defines the minimal interface of commitments for any polynomial
 /// commitment scheme.
-pub trait PCCommitment: Clone + CanonicalSerialize + CanonicalDeserialize
+pub trait PCCommitment:
+    Clone
+    + CanonicalSerialize
+    + CanonicalDeserialize
+    + algebra::ToBytes
+    + SemanticallyValid
 {
     /// Outputs a non-hiding commitment to the zero polynomial.
     fn empty() -> Self;
@@ -86,7 +90,7 @@ pub trait PCRandomness: Clone + CanonicalSerialize + CanonicalDeserialize {
 /// A polynomial along with information about its degree bound (if any), and the
 /// maximum number of queries that will be made to it. This latter number determines
 /// the amount of protection that will be provided to a commitment for this polynomial.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct LabeledPolynomial<F: Field> {
     label: PolynomialLabel,
     polynomial: Rc<Polynomial<F>>,
@@ -183,16 +187,25 @@ impl<C: PCCommitment> LabeledCommitment<C> {
     }
 }
 
-/// A labeled randomness.
-#[derive(Clone)]
-pub struct LabeledRandomness<R: PCRandomness> {
-    label: PolynomialLabel,
-    randomness: R,
+impl<C: PCCommitment> algebra::ToBytes for LabeledCommitment<C> {
+    #[inline]
+    fn write<W: Write>(&self, writer: W) -> IoResult<()> {
+
+        self.commitment.serialize_uncompressed(writer)
+            .map_err(|e| IoError::new(ErrorKind::Other, format!{"{:?}", e}))
+    }
 }
 
-impl<R: PCRandomness> LabeledRandomness<R> {
+/// A labeled randomness.
+#[derive(Clone, CanonicalSerialize, CanonicalDeserialize)]
+pub struct LabeledRandomness<Rand: PCRandomness> {
+    label: PolynomialLabel,
+    randomness: Rand,
+}
+
+impl<Rand: PCRandomness> LabeledRandomness<Rand> {
     /// Instantiate a new randomness_context.
-    pub fn new(label: PolynomialLabel, randomness: R) -> Self {
+    pub fn new(label: PolynomialLabel, randomness: Rand) -> Self {
         Self {
             label,
             randomness,
@@ -205,7 +218,7 @@ impl<R: PCRandomness> LabeledRandomness<R> {
     }
 
     /// Retrieve the commitment from `self`.
-    pub fn randomness(&self) -> &R {
+    pub fn randomness(&self) -> &Rand {
         &self.randomness
     }
 }

@@ -14,10 +14,7 @@ extern crate derivative;
 #[macro_use]
 extern crate bench_utils;
 
-use algebra::{
-    Field,
-    serialize::*,
-};
+use algebra::{Field, serialize::*, SemanticallyValid};
 pub use algebra_utils::fft::DensePolynomial as Polynomial;
 use rand_core::RngCore;
 
@@ -95,7 +92,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// The evaluation proof for a single point.
     type Proof: Clone + Debug + Eq + PartialEq + CanonicalSerialize + CanonicalDeserialize;
     /// The evaluation proof for a query set.
-    type BatchProof: Clone + Debug + Eq + PartialEq + CanonicalSerialize + CanonicalDeserialize;
+    type BatchProof: Clone + Debug + Eq + PartialEq + CanonicalSerialize + CanonicalDeserialize + SemanticallyValid;
     /// The error type for the scheme.
     type Error: std::error::Error + From<Error>;
 
@@ -511,8 +508,8 @@ fn lc_query_set_to_poly_query_set<'a, F: 'a + Field>(
 pub mod tests {
     use crate::*;
     use algebra::Field;
+    use algebra::serialize::test_canonical_serialize_deserialize;
     use rand::{distributions::Distribution, Rng, thread_rng};
-    use std::io::Cursor;
 
     #[derive(Copy, Clone, Default)]
     struct TestInfo {
@@ -526,40 +523,6 @@ pub mod tests {
         segmented: bool
     }
 
-    pub fn serialization_deserialization_test<F, PC>(a: &PC::BatchProof)
-        where
-            F: Field,
-            PC: PolynomialCommitment<F>,
-    {
-        let buf_size = a.serialized_size();
-        {
-            let mut serialized = vec![0; buf_size];
-            let mut cursor = Cursor::new(&mut serialized[..]);
-            CanonicalSerialize::serialize(a, &mut cursor).unwrap();
-
-            let mut cursor = Cursor::new(&serialized[..]);
-            let b = <PC::BatchProof as CanonicalDeserialize>::deserialize(&mut cursor).unwrap();
-            assert_eq!(a, &b);
-        }
-
-        {
-            let serialized = vec![0; buf_size - 1];
-            let mut cursor = Cursor::new(&serialized[..]);
-            <PC::BatchProof as CanonicalDeserialize>::deserialize(&mut cursor).unwrap_err();
-        }
-
-        {
-            let mut serialized = vec![0; a.uncompressed_size()];
-            let mut cursor = Cursor::new(&mut serialized[..]);
-            a.serialize_uncompressed(&mut cursor).unwrap();
-
-            let mut cursor = Cursor::new(&serialized[..]);
-            let b = <PC::BatchProof as CanonicalDeserialize>::deserialize_uncompressed(&mut cursor).unwrap();
-            assert_eq!(a, &b);
-        }
-
-    }
-
     pub fn bad_degree_bound_test<F, PC>() -> Result<(), PC::Error>
         where
             F: Field,
@@ -568,6 +531,8 @@ pub mod tests {
         let rng = &mut thread_rng();
         let max_degree = 100;
         let pp = PC::setup(max_degree)?;
+
+        test_canonical_serialize_deserialize(true, &pp);
 
         for _ in 0..10 {
             let supported_degree = rand::distributions::Uniform::from(1..=max_degree).sample(rng);
@@ -610,6 +575,9 @@ pub mod tests {
             )?;
             println!("Trimmed");
 
+            test_canonical_serialize_deserialize(true, &ck);
+            test_canonical_serialize_deserialize(true, &vk);
+
             let (comms, rands) = PC::commit(&ck, &polynomials, Some(rng))?;
 
             let mut query_set = QuerySet::new();
@@ -633,7 +601,7 @@ pub mod tests {
                 Some(rng),
             )?;
 
-            serialization_deserialization_test::<F, PC>(&proof);
+            test_canonical_serialize_deserialize(true, &proof);
 
             let result = PC::batch_check(
                 &vk,
@@ -668,6 +636,8 @@ pub mod tests {
             let max_degree =
                 max_degree.unwrap_or(rand::distributions::Uniform::from(2..=64).sample(rng));
             let pp = PC::setup(max_degree)?;
+
+            test_canonical_serialize_deserialize(true, &pp);
 
             let supported_degree = match supported_degree {
                 Some(0) => 0,
@@ -754,6 +724,9 @@ pub mod tests {
             )?;
             println!("Trimmed");
 
+            test_canonical_serialize_deserialize(true, &ck);
+            test_canonical_serialize_deserialize(true, &vk);
+
             let (comms, rands) = PC::commit(&ck, &polynomials, Some(rng))?;
 
             // Construct query set
@@ -781,7 +754,7 @@ pub mod tests {
                 Some(rng),
             )?;
 
-            serialization_deserialization_test::<F, PC>(&proof);
+            test_canonical_serialize_deserialize(true, &proof);
 
             let result = PC::batch_check(
                 &vk,
