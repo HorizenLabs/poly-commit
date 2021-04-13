@@ -245,7 +245,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let batch_commitment = batch_proof.batch_commitment.clone();
 
         // lambda
-        let mut cur_challenge: G::ScalarField = u128::rand(fs_rng).into();
+        let lambda: G::ScalarField = u128::rand(fs_rng).into();
+        let mut cur_challenge = lambda;
 
         // Fresh random challenge x
         fs_rng.absorb(&to_bytes![batch_commitment].unwrap());
@@ -257,7 +258,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
             computed_batch_v = computed_batch_v + &(cur_challenge * &((v_i - &y_i) / &(point - x_i)));
 
-            cur_challenge = u128::rand(fs_rng).into();
+            cur_challenge = cur_challenge * &lambda;
         }
 
         let mut batch_values = vec![];
@@ -921,7 +922,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let batch_time = start_timer!(|| "Multi poly multi point batching.");
 
         // lambda
-        let mut cur_challenge: G::ScalarField = u128::rand(fs_rng).into();
+        let lambda: G::ScalarField = u128::rand(fs_rng).into();
+        let mut cur_challenge = lambda;
 
         let poly_map: BTreeMap<_, _> = labeled_polynomials
             .iter()
@@ -963,7 +965,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             batch_polynomial += (cur_challenge, &polynomial);
 
             // lambda^i
-            cur_challenge = u128::rand(fs_rng).into();
+            cur_challenge = cur_challenge * &lambda;
         }
 
         let key_len = ck.comm_key.len();
