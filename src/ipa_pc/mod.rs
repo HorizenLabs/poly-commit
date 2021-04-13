@@ -18,6 +18,7 @@ use rayon::prelude::*;
 use algebra_kernels::polycommit::{get_kernels, get_gpu_min_length};
 
 use digest::Digest;
+use crate::rng::FiatShamirRng;
 
 /// A polynomial commitment scheme based on the hardness of the
 /// discrete logarithm problem in prime-order groups.
@@ -39,7 +40,7 @@ pub struct InnerProductArgPC<G: AffineCurve, D: Digest> {
 
 impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     /// `PROTOCOL_NAME` is used as a seed for the setup function.
-    pub const PROTOCOL_NAME: &'static [u8] = b"PC-DL-2020";
+    const PROTOCOL_NAME: &'static [u8] = b"PC-DL-2020";
 
     /// Create a Pedersen commitment to `scalars` using the commitment key `comm_key`.
     /// Optionally, randomize the commitment using `hiding_generator` and `randomizer`.
@@ -60,20 +61,6 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         comm
     }
 
-    fn compute_random_oracle_challenge(bytes: &[u8]) -> G::ScalarField {
-        let mut i = 0u64;
-        let mut challenge = None;
-        while challenge.is_none() {
-            let hash_input = to_bytes![bytes, i].unwrap();
-            let hash = D::digest(&hash_input);
-            challenge = <G::ScalarField as PrimeField>::from_random_bytes(&hash);
-
-            i += 1;
-        }
-
-        challenge.unwrap()
-    }
-
     #[inline]
     fn inner_product(l: &[G::ScalarField], r: &[G::ScalarField]) -> G::ScalarField {
         l.par_iter().zip(r).map(|(li, ri)| *li * ri).sum()
@@ -87,7 +74,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         point: G::ScalarField,
         values: impl IntoIterator<Item = G::ScalarField>,
         proof: &Proof<G>,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
+        fs_rng: &mut FiatShamirRng<D>,
     ) -> Option<SuccinctCheckPolynomial<G::ScalarField>> {
         let check_time = start_timer!(|| "Succinct checking");
 
@@ -101,9 +88,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let mut combined_commitment_proj = <G::Projective as ProjectiveCurve>::zero();
         let mut combined_v = G::ScalarField::zero();
 
-        let mut opening_challenge_counter = 0;
-        let mut cur_challenge = opening_challenges(opening_challenge_counter);
-        opening_challenge_counter += 1;
+        let mut cur_challenge: G::ScalarField = u128::rand(fs_rng).into();
 
         let labeled_commitments = commitments.into_iter();
         let values = values.into_iter();
@@ -122,8 +107,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             }
             combined_commitment_proj += &comm_lc.mul(&cur_challenge);
 
-            cur_challenge = opening_challenges(opening_challenge_counter);
-            opening_challenge_counter += 1;
+            cur_challenge = u128::rand(fs_rng).into();
 
             let degree_bound = labeled_commitment.degree_bound();
 
@@ -153,8 +137,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
                 combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
                 combined_commitment_proj += &commitment.comm[segments_count - 1].mul(cur_challenge * &shift);
 
-                cur_challenge = opening_challenges(opening_challenge_counter);
-                opening_challenge_counter += 1;
+                cur_challenge = u128::rand(fs_rng).into();
             }
         }
 
@@ -165,18 +148,18 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             let hiding_comm = proof.hiding_comm.unwrap();
             let rand = proof.rand.unwrap();
 
-            let hiding_challenge = Self::compute_random_oracle_challenge(
-                &to_bytes![combined_commitment, point, combined_v, hiding_comm].unwrap(),
-            );
+            fs_rng.absorb(&to_bytes![combined_commitment, point, combined_v, hiding_comm].unwrap());
+            let hiding_challenge: G::ScalarField = u128::rand(fs_rng).into();
+
             combined_commitment_proj += &(hiding_comm.mul(hiding_challenge) - &vk.s.mul(rand));
             combined_commitment = combined_commitment_proj.into_affine();
         }
 
         // Challenge for each round
         let mut round_challenges = Vec::with_capacity(log_d);
-        let mut round_challenge = Self::compute_random_oracle_challenge(
-            &to_bytes![combined_commitment, point, combined_v].unwrap(),
-        );
+
+        fs_rng.absorb(&to_bytes![combined_commitment, point, combined_v].unwrap());
+        let mut round_challenge: G::ScalarField = u128::rand(fs_rng).into();
 
         let h_prime = vk.h.mul(round_challenge);
 
@@ -186,9 +169,10 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let r_iter = proof.r_vec.iter();
 
         for (l, r) in l_iter.zip(r_iter) {
-            round_challenge = Self::compute_random_oracle_challenge(
-                &to_bytes![round_challenge, l, r].unwrap(),
-            );
+
+            fs_rng.absorb(&to_bytes![round_challenge, l, r].unwrap());
+            round_challenge = u128::rand(fs_rng).into();
+
             round_challenges.push(round_challenge);
             round_commitment_proj +=
                 &(l.mul(round_challenge.inverse().unwrap()) + &r.mul(round_challenge));
@@ -222,8 +206,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         query_set: &QuerySet<G::ScalarField>,
         values: &Evaluations<G::ScalarField>,
         batch_proof: &BatchProof<G>,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         _rng: &mut R,
+        fs_rng: &mut FiatShamirRng<D>,
     ) -> Result<(SuccinctCheckPolynomial<G::ScalarField>, G), Error>
     {
         let commitments: Vec<&'a LabeledCommitment<Commitment<G>>> = commitments.into_iter().map(|comm| comm).collect();
@@ -260,22 +244,12 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         // Commitment of the h(X) polynomial
         let batch_commitment = batch_proof.batch_commitment.clone();
 
-        // TODO: When we will move to Sponge-based construction, we will absorb the
-        //       batch_commitment only and then squeeze a new challenge
-        // Fresh random challenge x
-        let point = Self::compute_random_oracle_challenge(
-            &to_bytes![
-                batch_commitment,
-                points
-            ]
-                .unwrap(),
-        );
-
-        let mut opening_challenge_counter = 0;
-
         // lambda
-        let mut cur_challenge = opening_challenges(opening_challenge_counter);
-        opening_challenge_counter += 1;
+        let mut cur_challenge: G::ScalarField = u128::rand(fs_rng).into();
+
+        // Fresh random challenge x
+        fs_rng.absorb(&to_bytes![batch_commitment].unwrap());
+        let point: G::ScalarField = u128::rand(fs_rng).into();
 
         let mut computed_batch_v = G::ScalarField::zero();
 
@@ -283,8 +257,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
             computed_batch_v = computed_batch_v + &(cur_challenge * &((v_i - &y_i) / &(point - x_i)));
 
-            cur_challenge = opening_challenges(opening_challenge_counter);
-            opening_challenge_counter += 1;
+            cur_challenge = u128::rand(fs_rng).into();
         }
 
         let mut batch_values = vec![];
@@ -313,15 +286,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         end_timer!(evals_time);
 
         let check_time = start_timer!(|| "Succinct check batched polynomial");
-        let opening_challenge = Self::compute_random_oracle_challenge(
-            &to_bytes![
-                batch_proof.batch_values.values().collect::<Vec<&G::ScalarField>>(),
-                batch_commitment,
-                point
-            ]
-                .unwrap(),
-        );
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
+
+        fs_rng.absorb(&to_bytes![batch_proof.batch_values.values().collect::<Vec<&G::ScalarField>>(), batch_commitment, point].unwrap());
 
         let d = vk.supported_degree();
 
@@ -339,7 +305,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             ));
         }
 
-        let check_poly = Self::succinct_check(vk, commitments, point, batch_values, proof, &opening_challenges);
+        let check_poly = Self::succinct_check(vk, commitments, point, batch_values, proof, fs_rng);
 
         if check_poly.is_none() {
             end_timer!(check_time);
@@ -500,6 +466,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
     type Proof = Proof<G>;
     type BatchProof = BatchProof<G>;
     type Error = Error;
+    type RandomOracle = FiatShamirRng<D>;
 
     fn setup<R: RngCore>(
         max_degree: usize,
@@ -522,6 +489,12 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         };
 
         Ok(pp)
+    }
+
+    fn setup_oracle() -> Self::RandomOracle {
+        FiatShamirRng::<D>::from_seed(
+            &to_bytes![&Self::PROTOCOL_NAME].unwrap(),
+        )
     }
 
     fn trim(
@@ -651,9 +624,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         point: G::ScalarField,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<Self::Proof, Self::Error>
         where
             Self::Commitment: 'a,
@@ -673,9 +646,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let combine_time = start_timer!(|| "Combining polynomials, randomness, and commitments.");
 
-        let mut opening_challenge_counter = 0;
-        let mut cur_challenge = opening_challenges(opening_challenge_counter);
-        opening_challenge_counter += 1;
+        let mut cur_challenge: G::ScalarField = u128::rand(fs_rng).into();
 
         for (labeled_polynomial, (labeled_commitment, labeled_randomness)) in
         polys_iter.zip(comms_iter.zip(rands_iter))
@@ -740,8 +711,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 combined_rand += &(cur_challenge * &rand_lc);
             }
 
-            cur_challenge = opening_challenges(opening_challenge_counter);
-            opening_challenge_counter += 1;
+            cur_challenge = u128::rand(fs_rng).into();
 
             if let Some(degree_bound_len) = degree_bound_len {
 
@@ -773,8 +743,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                     combined_rand += &(cur_challenge * &shift * &randomness.rand[segments_count - 1]);
                 }
 
-                cur_challenge = opening_challenges(opening_challenge_counter);
-                opening_challenge_counter += 1;
+                cur_challenge = u128::rand(fs_rng).into();
             }
         }
 
@@ -813,15 +782,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             hiding_commitment = Some(batch.pop().unwrap());
             combined_commitment = batch.pop().unwrap();
 
-            let hiding_challenge = Self::compute_random_oracle_challenge(
-                &to_bytes![
-                    combined_commitment,
-                    point,
-                    combined_v,
-                    hiding_commitment.unwrap()
-                ]
-                    .unwrap(),
-            );
+            fs_rng.absorb(&to_bytes![combined_commitment, point, combined_v, hiding_commitment.unwrap()].unwrap());
+            let hiding_challenge: G::ScalarField = u128::rand(fs_rng).into();
+
             combined_polynomial += (hiding_challenge, &hiding_polynomial);
             combined_rand += &(hiding_challenge * &hiding_rand);
             combined_commitment_proj +=
@@ -842,9 +805,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         combined_commitment = combined_commitment_proj.into_affine();
 
         // ith challenge
-        let mut round_challenge = Self::compute_random_oracle_challenge(
-            &to_bytes![combined_commitment, point, combined_v].unwrap(),
-        );
+        fs_rng.absorb(&to_bytes![combined_commitment, point, combined_v].unwrap());
+        let mut round_challenge: G::ScalarField = u128::rand(fs_rng).into();
 
         let h_prime = ck.h.mul(round_challenge).into_affine();
 
@@ -896,9 +858,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             l_vec.push(lr[0]);
             r_vec.push(lr[1]);
 
-            round_challenge = Self::compute_random_oracle_challenge(
-                &to_bytes![round_challenge, lr[0], lr[1]].unwrap(),
-            );
+            fs_rng.absorb(&to_bytes![round_challenge, lr[0], lr[1]].unwrap());
+
+            round_challenge = u128::rand(fs_rng).into();
             let round_challenge_inv = round_challenge.inverse().unwrap();
 
             Self::polycommit_round_reduce(
@@ -940,13 +902,13 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<G::ScalarField>,
+        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
+        rng: Option<&mut dyn RngCore>,
         // TODO: In order to implement the Fiat-Shamir transform in a "clean" manner,
         //       we need to pass a sponge instead of opening_challenges().
         //       This sponge is then used to squeeze the opening challenge(s) as well
         //       as the fresh query point x
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
-        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
-        rng: Option<&mut dyn RngCore>,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<Self::BatchProof, Self::Error>
         where
             Self::Randomness: 'a,
@@ -958,11 +920,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let batch_time = start_timer!(|| "Multi poly multi point batching.");
 
-        let mut opening_challenge_counter = 0;
-
         // lambda
-        let mut cur_challenge = opening_challenges(opening_challenge_counter);
-        opening_challenge_counter += 1;
+        let mut cur_challenge: G::ScalarField = u128::rand(fs_rng).into();
 
         let poly_map: BTreeMap<_, _> = labeled_polynomials
             .iter()
@@ -1004,8 +963,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             batch_polynomial += (cur_challenge, &polynomial);
 
             // lambda^i
-            cur_challenge = opening_challenges(opening_challenge_counter);
-            opening_challenge_counter += 1;
+            cur_challenge = u128::rand(fs_rng).into();
         }
 
         let key_len = ck.comm_key.len();
@@ -1046,17 +1004,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             ];
         }
 
-
-        // TODO: When we will move to Sponge-based construction, we will absorb the batch_commitment
-        //       only and then squeeze a new challenge
         // Fresh random challenge x
-        let point= Self::compute_random_oracle_challenge(
-            &to_bytes![
-                batch_commitment,
-                points
-            ]
-                .unwrap(),
-        );
+        fs_rng.absorb(&to_bytes![batch_commitment].unwrap());
+        let point: G::ScalarField = u128::rand(fs_rng).into();
 
         // Values: v_i = p_i(x), where x is fresh random challenge
         let batch_values: BTreeMap<_, _> = labeled_polynomials
@@ -1089,24 +1039,16 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         end_timer!(batch_time);
 
-        let opening_challenge = Self::compute_random_oracle_challenge(
-            &to_bytes![
-                batch_values.values().collect::<Vec<&G::ScalarField>>(),
-                batch_commitment,
-                point
-            ]
-                .unwrap(),
-        );
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
+        fs_rng.absorb(&to_bytes![batch_values.values().collect::<Vec<&G::ScalarField>>(), batch_commitment, point].unwrap());
 
         let proof = Self::open_individual_opening_challenges(
             ck,
             labeled_polynomials,
             commitments,
             point,
-            &opening_challenges,
             rands,
-            rng
+            rng,
+            fs_rng,
         )?;
 
         Ok(BatchProof {
@@ -1122,8 +1064,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         point: G::ScalarField,
         values: impl IntoIterator<Item = G::ScalarField>,
         proof: &Self::Proof,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         _rng: Option<&mut dyn RngCore>,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a,
@@ -1146,7 +1088,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         }
 
         let check_poly =
-            Self::succinct_check(vk, commitments, point, values, proof, opening_challenges);
+            Self::succinct_check(vk, commitments, point, values, proof, fs_rng);
 
         if check_poly.is_none() {
             return Ok(false);
@@ -1180,12 +1122,12 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         query_set: &QuerySet<G::ScalarField>,
         evaluations: &Evaluations<G::ScalarField>,
         batch_proof: &Self::BatchProof,
+        rng: &mut R,
         // TODO: In order to implement the Fiat-Shamir transform in a "clean" manner,
         //       we need to pass a sponge instead of opening_challenges(). This sponge
         //       is then used to squeeze the opening challenge(s) as well as the fresh
         //       query point x
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
-        rng: &mut R,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a,
@@ -1197,8 +1139,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             query_set,
             evaluations,
             batch_proof,
-            opening_challenges,
-            rng
+            rng,
+            fs_rng,
         )?;
 
         // DLOG hard part
