@@ -36,12 +36,12 @@ impl<G: AffineCurve> PCUniversalParams for UniversalParams<G> {
 /// polynomial.
 #[derive(Derivative)]
 #[derivative(
-Default(bound = ""),
-Hash(bound = ""),
-Clone(bound = ""),
-Debug(bound = ""),
-Eq(bound = ""),
-PartialEq(bound = ""),
+    Default(bound = ""),
+    Hash(bound = ""),
+    Clone(bound = ""),
+    Debug(bound = ""),
+    Eq(bound = ""),
+    PartialEq(bound = ""),
 )]
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct CommitterKey<G: AffineCurve> {
@@ -61,6 +61,18 @@ pub struct CommitterKey<G: AffineCurve> {
 
     /// The hash of all the previous fields
     pub hash: Vec<u8>,
+}
+
+impl<G: AffineCurve> SemanticallyValid for CommitterKey<G> {
+
+    // Technically this function is redundant, since the keys are generated
+    // through a deterministic procedure starting from a public string.
+    fn is_valid(&self) -> bool {
+        self.comm_key.is_valid() &&
+            self.h.is_valid() &&
+            self.s.is_valid() &&
+            PCCommitterKey::supported_degree(self) <= self.max_degree
+    }
 }
 
 impl<G: AffineCurve> PCCommitterKey for CommitterKey<G> {
@@ -293,10 +305,8 @@ impl<G: AffineCurve> CanonicalSerialize for Proof<G> {
             CanonicalSerialize::serialize(p, &mut writer)?;
         }
 
-        // r_vec
-        // More than enough for practical applications
-        let r_vec_len = u8::try_from(self.r_vec.len()).map_err(|_| SerializationError::NotEnoughSpace)?;
-        CanonicalSerialize::serialize(&r_vec_len, &mut writer)?;
+        // We know r_vec must be equal in size to l_vec, so no need to serialize it too
+        assert_eq!(self.l_vec.len(), self.r_vec.len());
 
         // Save only one of the coordinates of the point and one byte of flags in order
         // to be able to reconstruct the other coordinate
@@ -313,7 +323,7 @@ impl<G: AffineCurve> CanonicalSerialize for Proof<G> {
 
     fn serialized_size(&self) -> usize {
         1 + self.l_vec.iter().map(|item| item.serialized_size()).sum::<usize>()
-            + 1 + self.r_vec.iter().map(|item| item.serialized_size()).sum::<usize>()
+            + self.r_vec.iter().map(|item| item.serialized_size()).sum::<usize>()
             + self.final_comm_key.serialized_size()
             + self.c.serialized_size()
             + self.hiding_comm.serialized_size()
@@ -333,7 +343,7 @@ impl<G: AffineCurve> CanonicalDeserialize for Proof<G> {
         }
 
         // Read r_vec
-        let r_vec_len: u8 = CanonicalDeserialize::deserialize(&mut reader)?;
+        let r_vec_len = l_vec_len;
         let mut r_vec = Vec::with_capacity(r_vec_len as usize);
         for _ in 0..(r_vec_len as usize) {
             let c: G = CanonicalDeserialize::deserialize(&mut reader)?;
@@ -414,10 +424,8 @@ impl<G: AffineCurve> CanonicalSerialize for BatchProof<G> {
 
     fn serialized_size(&self) -> usize {
         self.proof.serialized_size()
-            + 1
-            + self.batch_commitment.iter().map(|item| item.serialized_size()).sum::<usize>()
-            + 1
-            + self.batch_values.iter().map(|(k, v)| k.serialized_size() + v.serialized_size()).sum::<usize>()
+            + 1 + (self.batch_commitment.len() * self.batch_commitment[0].serialized_size())
+            + 1 + self.batch_values.iter().map(|(k, v)| k.serialized_size() + v.serialized_size()).sum::<usize>()
     }
 }
 
@@ -451,7 +459,7 @@ impl<G: AffineCurve> CanonicalDeserialize for BatchProof<G> {
 /// `SuccinctCheckPolynomial` is a succinctly-representated polynomial
 /// generated from the `log_d` random oracle challenges generated in `open`.
 /// It has the special property that can be evaluated in `O(log_d)` time.
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct SuccinctCheckPolynomial<F: PrimeField>(pub Vec<F>);
 
 impl<F: PrimeField> SuccinctCheckPolynomial<F> {

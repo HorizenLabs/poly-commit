@@ -958,7 +958,7 @@ pub mod tests {
         let info = TestInfo {
             num_iters: 100,
             max_degree: None,
-            supported_degree: Some(0),
+            supported_degree: None,
             num_polynomials: 1,
             enforce_degree_bounds: false,
             max_num_queries: 1,

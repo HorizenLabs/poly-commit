@@ -1,9 +1,12 @@
 use crate::{Rc, String, Vec};
 use algebra::{Field, serialize::{CanonicalSerialize, CanonicalDeserialize, SerializationError}, SemanticallyValid};
 pub use algebra_utils::DensePolynomial as Polynomial;
-use std::borrow::Borrow;
-use std::ops::{AddAssign, MulAssign, SubAssign};
-use std::io::{Read, Write, Error as IoError, ErrorKind, Result as IoResult};
+use std::{
+    io::{Read, Write, Error as IoError, ErrorKind, Result as IoResult},
+    ops::{AddAssign, MulAssign, SubAssign},
+    borrow::Borrow,
+    fmt::Debug,
+};
 use rand_core::RngCore;
 
 /// Labels a `LabeledPolynomial` or a `LabeledCommitment`.
@@ -12,7 +15,7 @@ pub type PolynomialLabel = String;
 /// Defines the minimal interface for public params for any polynomial
 /// commitment scheme.
 pub trait PCUniversalParams:
-    Clone + std::fmt::Debug + CanonicalSerialize + CanonicalDeserialize + Eq + PartialEq
+    Clone + Debug + CanonicalSerialize + CanonicalDeserialize + Eq + PartialEq
 {
     /// Outputs the maximum degree supported by the committer key.
     fn max_degree(&self) -> usize;
@@ -21,7 +24,13 @@ pub trait PCUniversalParams:
 /// Defines the minimal interface of committer keys for any polynomial
 /// commitment scheme.
 pub trait PCCommitterKey:
-    Clone + std::fmt::Debug + Eq + PartialEq + CanonicalSerialize + CanonicalDeserialize
+    Clone +
+    Debug +
+    Eq +
+    PartialEq +
+    CanonicalSerialize +
+    CanonicalDeserialize +
+    SemanticallyValid
 {
     /// Outputs the maximum degree supported by the universal parameters
     /// `Self` was derived from.
@@ -34,7 +43,13 @@ pub trait PCCommitterKey:
 /// Defines the minimal interface of verifier keys for any polynomial
 /// commitment scheme.
 pub trait PCVerifierKey:
-    Clone + std::fmt::Debug + Eq + PartialEq + CanonicalSerialize + CanonicalDeserialize
+    Clone +
+    Debug +
+    Eq +
+    PartialEq +
+    CanonicalSerialize +
+    CanonicalDeserialize +
+    SemanticallyValid
 {
     /// Outputs the maximum degree supported by the universal parameters
     /// `Self` was derived from.
@@ -76,7 +91,7 @@ pub trait PCPreparedCommitment<UNPREPARED: PCCommitment>: Clone {
 
 /// Defines the minimal interface of commitment randomness for any polynomial
 /// commitment scheme.
-pub trait PCRandomness: Clone + CanonicalSerialize + CanonicalDeserialize {
+pub trait PCRandomness: Clone + Debug + Eq + PartialEq + CanonicalSerialize + CanonicalDeserialize {
     /// Outputs empty randomness that does not hide the commitment.
     fn empty(segments_count: usize) -> Self;
 
@@ -197,7 +212,7 @@ impl<C: PCCommitment> algebra::ToBytes for LabeledCommitment<C> {
 }
 
 /// A labeled randomness.
-#[derive(Clone, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct LabeledRandomness<Rand: PCRandomness> {
     label: PolynomialLabel,
     randomness: Rand,
