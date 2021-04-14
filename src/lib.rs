@@ -38,6 +38,8 @@ pub use data_structures::*;
 pub mod error;
 pub use error::*;
 
+use crate::rng::FiatShamirRng;
+
 /// A random number generator that bypasses some limitations of the Rust borrow
 /// checker.
 pub mod optional_rng;
@@ -125,7 +127,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// The error type for the scheme.
     type Error: std::error::Error + From<Error>;
     /// Source of random data
-    type RandomOracle: RngCore;
+    type RandomOracle: FiatShamirRng;
     /// Constructs public parameters when given as input the maximum degree `degree`
     /// for the polynomial commitment scheme.
     fn setup<R: RngCore>(

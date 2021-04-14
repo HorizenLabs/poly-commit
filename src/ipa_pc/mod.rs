@@ -18,7 +18,7 @@ use rayon::prelude::*;
 use algebra_kernels::polycommit::{get_kernels, get_gpu_min_length};
 
 use digest::Digest;
-use crate::rng::FiatShamirRng;
+use crate::rng::{FiatShamirRng, FiatShamirChaChaRng};
 
 /// A polynomial commitment scheme based on the hardness of the
 /// discrete logarithm problem in prime-order groups.
@@ -74,7 +74,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         point: G::ScalarField,
         values: impl IntoIterator<Item = G::ScalarField>,
         proof: &Proof<G>,
-        fs_rng: &mut FiatShamirRng<D>,
+        fs_rng: &mut FiatShamirChaChaRng<D>,
     ) -> Option<SuccinctCheckPolynomial<G::ScalarField>> {
         let check_time = start_timer!(|| "Succinct checking");
 
@@ -207,7 +207,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         values: &Evaluations<G::ScalarField>,
         batch_proof: &BatchProof<G>,
         _rng: &mut R,
-        fs_rng: &mut FiatShamirRng<D>,
+        fs_rng: &mut FiatShamirChaChaRng<D>,
     ) -> Result<(SuccinctCheckPolynomial<G::ScalarField>, G), Error>
     {
         let commitments: Vec<&'a LabeledCommitment<Commitment<G>>> = commitments.into_iter().map(|comm| comm).collect();
@@ -467,7 +467,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
     type Proof = Proof<G>;
     type BatchProof = BatchProof<G>;
     type Error = Error;
-    type RandomOracle = FiatShamirRng<D>;
+    type RandomOracle = FiatShamirChaChaRng<D>;
 
     fn setup<R: RngCore>(
         max_degree: usize,
@@ -493,7 +493,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
     }
 
     fn setup_oracle() -> Self::RandomOracle {
-        FiatShamirRng::<D>::from_seed(
+        FiatShamirChaChaRng::<D>::from_seed(
             &to_bytes![&Self::PROTOCOL_NAME].unwrap(),
         )
     }
