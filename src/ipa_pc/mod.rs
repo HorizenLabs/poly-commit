@@ -905,10 +905,6 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         query_set: &QuerySet<G::ScalarField>,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
-        // TODO: In order to implement the Fiat-Shamir transform in a "clean" manner,
-        //       we need to pass a sponge instead of opening_challenges().
-        //       This sponge is then used to squeeze the opening challenge(s) as well
-        //       as the fresh query point x
         fs_rng: &mut Self::RandomOracle,
     ) -> Result<Self::BatchProof, Self::Error>
         where
@@ -1125,10 +1121,6 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         evaluations: &Evaluations<G::ScalarField>,
         batch_proof: &Self::BatchProof,
         rng: &mut R,
-        // TODO: In order to implement the Fiat-Shamir transform in a "clean" manner,
-        //       we need to pass a sponge instead of opening_challenges(). This sponge
-        //       is then used to squeeze the opening challenge(s) as well as the fresh
-        //       query point x
         fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where

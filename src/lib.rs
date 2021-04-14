@@ -714,6 +714,7 @@ pub mod tests {
         }
         println!("Generated query set");
 
+        let mut fs_rng = PC::setup_oracle();
         let proof = PC::batch_open(
             &ck,
             &polynomials,
@@ -721,7 +722,7 @@ pub mod tests {
             &query_set,
             &rands,
             Some(rng),
-            &mut PC::setup_oracle(),
+            &mut fs_rng,
         )?;
 
         Ok(VerifierData {
@@ -801,6 +802,7 @@ pub mod tests {
             }
             println!("Generated query set");
 
+            let mut fs_rng = PC::setup_oracle();
             let proof = PC::batch_open(
                 &ck,
                 &polynomials,
@@ -808,8 +810,9 @@ pub mod tests {
                 &query_set,
                 &rands,
                 Some(rng),
-                &mut PC::setup_oracle(),
+                &mut fs_rng,
             )?;
+            let mut fs_rng = PC::setup_oracle();
             let result = PC::batch_check(
                 &vk,
                 &comms,
@@ -817,7 +820,7 @@ pub mod tests {
                 &values,
                 &proof,
                 rng,
-                &mut PC::setup_oracle(),
+                &mut fs_rng
             )?;
             assert!(result, "proof was incorrect, Query set: {:#?}", query_set);
         }
@@ -842,6 +845,7 @@ pub mod tests {
                 ..
             } = get_data_for_verifier::<F, PC>(info, None).unwrap();
 
+            let mut fs_rng = PC::setup_oracle();
             let result = PC::batch_check(
                 &vk,
                 &comms,
@@ -849,7 +853,7 @@ pub mod tests {
                 &values,
                 &proof,
                 &mut thread_rng(),
-                &mut PC::setup_oracle(),
+                &mut fs_rng
             )?;
             if !result {
                 println!(
@@ -999,6 +1003,7 @@ pub mod tests {
             println!("Generated query set");
             println!("Linear combinations: {:?}", linear_combinations);
 
+            let mut fs_rng = PC::setup_oracle();
             let proof = PC::open_combinations(
                 &ck,
                 &linear_combinations,
@@ -1007,9 +1012,12 @@ pub mod tests {
                 &query_set,
                 &rands,
                 Some(rng),
-                &mut PC::setup_oracle(),
+                &mut fs_rng,
             )?;
+
             println!("Generated proof");
+
+            let mut fs_rng = PC::setup_oracle();
             let result = PC::check_combinations(
                 &vk,
                 &linear_combinations,
@@ -1018,8 +1026,9 @@ pub mod tests {
                 &values,
                 &proof,
                 rng,
-                &mut PC::setup_oracle()
+                &mut fs_rng,
             )?;
+
             if !result {
                 println!(
                     "Failed with {} polynomials, num_points_in_query_set: {:?}",
