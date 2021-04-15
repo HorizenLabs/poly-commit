@@ -85,7 +85,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let mut combined_commitment_proj = <G::Projective as ProjectiveCurve>::zero();
         let mut combined_v = G::ScalarField::zero();
 
-        let mut cur_challenge: G::ScalarField = u128::rand(fs_rng).into();
+        let mut cur_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
         let labeled_commitments = commitments.into_iter();
         let values = values.into_iter();
@@ -104,7 +104,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             }
             combined_commitment_proj += &comm_lc.mul(&cur_challenge);
 
-            cur_challenge = u128::rand(fs_rng).into();
+            cur_challenge = fs_rng.squeeze_128_bits_challenge();
 
             let degree_bound = labeled_commitment.degree_bound();
 
@@ -134,7 +134,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
                 combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
                 combined_commitment_proj += &commitment.comm[segments_count - 1].mul(cur_challenge * &shift);
 
-                cur_challenge = u128::rand(fs_rng).into();
+                cur_challenge = fs_rng.squeeze_128_bits_challenge();
             }
         }
 
@@ -146,7 +146,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             let rand = proof.rand.unwrap();
 
             fs_rng.absorb(&to_bytes![combined_commitment, point, combined_v, hiding_comm].unwrap());
-            let hiding_challenge: G::ScalarField = u128::rand(fs_rng).into();
+            let hiding_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
             combined_commitment_proj += &(hiding_comm.mul(hiding_challenge) - &vk.s.mul(rand));
             combined_commitment = combined_commitment_proj.into_affine();
@@ -156,7 +156,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let mut round_challenges = Vec::with_capacity(log_d);
 
         fs_rng.absorb(&to_bytes![combined_commitment, point, combined_v].unwrap());
-        let mut round_challenge: G::ScalarField = u128::rand(fs_rng).into();
+        let mut round_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
         let h_prime = vk.h.mul(round_challenge);
 
@@ -168,7 +168,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         for (l, r) in l_iter.zip(r_iter) {
 
             fs_rng.absorb(&to_bytes![round_challenge, l, r].unwrap());
-            round_challenge = u128::rand(fs_rng).into();
+            round_challenge = fs_rng.squeeze_128_bits_challenge();
 
             round_challenges.push(round_challenge);
             round_commitment_proj +=
@@ -242,12 +242,12 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let batch_commitment = batch_proof.batch_commitment.clone();
 
         // lambda
-        let lambda: G::ScalarField = u128::rand(fs_rng).into();
+        let lambda: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
         let mut cur_challenge = lambda;
 
         // Fresh random challenge x
         fs_rng.absorb(&to_bytes![batch_commitment].unwrap());
-        let point: G::ScalarField = u128::rand(fs_rng).into();
+        let point: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
         let mut computed_batch_v = G::ScalarField::zero();
 
@@ -647,7 +647,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let combine_time = start_timer!(|| "Combining polynomials, randomness, and commitments.");
 
-        let mut cur_challenge: G::ScalarField = u128::rand(fs_rng).into();
+        let mut cur_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
         for (labeled_polynomial, (labeled_commitment, labeled_randomness)) in
         polys_iter.zip(comms_iter.zip(rands_iter))
@@ -712,7 +712,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 combined_rand += &(cur_challenge * &rand_lc);
             }
 
-            cur_challenge = u128::rand(fs_rng).into();
+            cur_challenge = fs_rng.squeeze_128_bits_challenge();
 
             if let Some(degree_bound_len) = degree_bound_len {
 
@@ -744,7 +744,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                     combined_rand += &(cur_challenge * &shift * &randomness.rand[segments_count - 1]);
                 }
 
-                cur_challenge = u128::rand(fs_rng).into();
+                cur_challenge = fs_rng.squeeze_128_bits_challenge();
             }
         }
 
@@ -784,7 +784,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             combined_commitment = batch.pop().unwrap();
 
             fs_rng.absorb(&to_bytes![combined_commitment, point, combined_v, hiding_commitment.unwrap()].unwrap());
-            let hiding_challenge: G::ScalarField = u128::rand(fs_rng).into();
+            let hiding_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
             combined_polynomial += (hiding_challenge, &hiding_polynomial);
             combined_rand += &(hiding_challenge * &hiding_rand);
@@ -807,7 +807,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         // ith challenge
         fs_rng.absorb(&to_bytes![combined_commitment, point, combined_v].unwrap());
-        let mut round_challenge: G::ScalarField = u128::rand(fs_rng).into();
+        let mut round_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
         let h_prime = ck.h.mul(round_challenge).into_affine();
 
@@ -861,7 +861,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
             fs_rng.absorb(&to_bytes![round_challenge, lr[0], lr[1]].unwrap());
 
-            round_challenge = u128::rand(fs_rng).into();
+            round_challenge = fs_rng.squeeze_128_bits_challenge();
             let round_challenge_inv = round_challenge.inverse().unwrap();
 
             Self::polycommit_round_reduce(
@@ -918,7 +918,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let batch_time = start_timer!(|| "Multi poly multi point batching.");
 
         // lambda
-        let lambda: G::ScalarField = u128::rand(fs_rng).into();
+        let lambda: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
         let mut cur_challenge = lambda;
 
         let poly_map: BTreeMap<_, _> = labeled_polynomials
@@ -1004,7 +1004,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         // Fresh random challenge x
         fs_rng.absorb(&to_bytes![batch_commitment].unwrap());
-        let point: G::ScalarField = u128::rand(fs_rng).into();
+        let point: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
         // Values: v_i = p_i(x), where x is fresh random challenge
         let batch_values: BTreeMap<_, _> = labeled_polynomials
