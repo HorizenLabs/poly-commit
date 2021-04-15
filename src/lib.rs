@@ -137,9 +137,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         rng: &mut R,
     ) -> Result<Self::UniversalParams, Self::Error>;
 
-    // /// Setup random oracle from seed
-    // fn setup_oracle() -> Self::RandomOracle;
-
     /// Specializes the public parameters for polynomials up to the given `supported_degree`
     /// and for enforcing degree bounds in the range `1..=supported_degree`.
     fn trim(

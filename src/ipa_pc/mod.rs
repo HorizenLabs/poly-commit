@@ -491,12 +491,6 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         Ok(pp)
     }
-    //
-    // fn setup_oracle() -> Self::RandomOracle {
-    //     FiatShamirChaChaRng::<D>::from_seed(
-    //         &to_bytes![&Self::PROTOCOL_NAME].unwrap(),
-    //     )
-    // }
 
     fn trim(
         pp: &Self::UniversalParams,
