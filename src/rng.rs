@@ -1,5 +1,5 @@
 use crate::Vec;
-use algebra::{FromBytes, ToBytes};
+use algebra::{FromBytes, ToBytes, Field, UniformRand};
 use std::marker::PhantomData;
 use digest::{generic_array::GenericArray, Digest};
 use rand_chacha::ChaChaRng;
@@ -9,9 +9,17 @@ use rand_core::{RngCore, SeedableRng};
 /// and the new seed material.
 // TODO: later: re-evaluate decision about ChaChaRng
 pub trait FiatShamirRng: RngCore {
+    /// Create a new `Self` by initializing with a fresh seed.
+    fn from_seed<'a, T: 'a + ToBytes>(seed: &'a T) -> Self;
+
     /// Refresh `self.seed` with new material. Achieved by setting
     /// `self.seed = H(self.seed || new_seed)`.
     fn absorb<'a, T: 'a + ToBytes>(&mut self, seed: &'a T);
+
+    /// Squeeze a new random field element
+    fn squeeze_128_bits_challenge<F: Field>(&mut self) -> F {
+        u128::rand(self).into()
+    }
 }
 
 /// A `SeedableRng` that refreshes its seed by hashing together the previous seed
@@ -58,13 +66,11 @@ impl<D: Digest> FiatShamirRng for FiatShamirChaChaRng<D> {
         let seed: [u8; 32] = FromBytes::read(self.seed.as_ref()).expect("failed to get [u32; 8]");
         self.r = ChaChaRng::from_seed(seed);
     }
-}
 
-impl<D: Digest> FiatShamirChaChaRng<D> {
     /// Create a new `Self` by initializing with a fresh seed.
     /// `self.seed = H(self.seed || new_seed)`.
     #[inline]
-    pub fn from_seed<'a, T: 'a + ToBytes>(seed: &'a T) -> Self {
+    fn from_seed<'a, T: 'a + ToBytes>(seed: &'a T) -> Self {
         let mut bytes = Vec::new();
         seed.write(&mut bytes).expect("failed to convert to bytes");
         let seed = D::digest(&bytes);

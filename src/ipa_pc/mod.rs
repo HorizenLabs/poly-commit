@@ -39,9 +39,6 @@ pub struct InnerProductArgPC<G: AffineCurve, D: Digest> {
 }
 
 impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
-    /// `PROTOCOL_NAME` is used as a seed for the setup function.
-    const PROTOCOL_NAME: &'static [u8] = b"PC-DL-2020";
-
     /// Create a Pedersen commitment to `scalars` using the commitment key `comm_key`.
     /// Optionally, randomize the commitment using `hiding_generator` and `randomizer`.
     fn cm_commit(
@@ -457,6 +454,9 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 }
 
 impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerProductArgPC<G, D> {
+    /// `PROTOCOL_NAME` is used as a seed for the setup function.
+    const PROTOCOL_NAME: &'static [u8] = b"PC-DL-2020";
+
     type UniversalParams = UniversalParams<G>;
     type CommitterKey = CommitterKey<G>;
     type VerifierKey = VerifierKey<G>;
@@ -491,12 +491,12 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         Ok(pp)
     }
-
-    fn setup_oracle() -> Self::RandomOracle {
-        FiatShamirChaChaRng::<D>::from_seed(
-            &to_bytes![&Self::PROTOCOL_NAME].unwrap(),
-        )
-    }
+    //
+    // fn setup_oracle() -> Self::RandomOracle {
+    //     FiatShamirChaChaRng::<D>::from_seed(
+    //         &to_bytes![&Self::PROTOCOL_NAME].unwrap(),
+    //     )
+    // }
 
     fn trim(
         pp: &Self::UniversalParams,

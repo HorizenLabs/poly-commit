@@ -104,6 +104,8 @@ pub struct BatchLCProof<F: Field, PC: PolynomialCommitment<F>> {
 /// of evaluation for the corresponding commitments at a query set `Q`, while
 /// enforcing per-polynomial degree bounds.
 pub trait PolynomialCommitment<F: Field>: Sized {
+    /// Seed string used for initial setup
+    const PROTOCOL_NAME: &'static [u8];
     /// The universal parameters for the commitment scheme. These are "trimmed"
     /// down to `Self::CommitterKey` and `Self::VerifierKey` by `Self::trim`.
     type UniversalParams: PCUniversalParams;
@@ -135,8 +137,8 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         rng: &mut R,
     ) -> Result<Self::UniversalParams, Self::Error>;
 
-    /// Setup random oracle from seed
-    fn setup_oracle() -> Self::RandomOracle;
+    // /// Setup random oracle from seed
+    // fn setup_oracle() -> Self::RandomOracle;
 
     /// Specializes the public parameters for polynomials up to the given `supported_degree`
     /// and for enforcing degree bounds in the range `1..=supported_degree`.
@@ -549,7 +551,7 @@ fn lc_query_set_to_poly_query_set<'a, F: 'a + Field>(
 #[cfg(test)]
 pub mod tests {
     use crate::*;
-    use algebra::Field;
+    use algebra::{Field, ToBytes, to_bytes};
     use rand::{distributions::Distribution, Rng, thread_rng};
     use std::marker::PhantomData;
 
@@ -714,7 +716,7 @@ pub mod tests {
         }
         println!("Generated query set");
 
-        let mut fs_rng = PC::setup_oracle();
+        let mut fs_rng = PC::RandomOracle::from_seed(&to_bytes![&PC::PROTOCOL_NAME].unwrap());
         let proof = PC::batch_open(
             &ck,
             &polynomials,
@@ -802,7 +804,7 @@ pub mod tests {
             }
             println!("Generated query set");
 
-            let mut fs_rng = PC::setup_oracle();
+            let mut fs_rng = PC::RandomOracle::from_seed(&to_bytes![&PC::PROTOCOL_NAME].unwrap());
             let proof = PC::batch_open(
                 &ck,
                 &polynomials,
@@ -812,7 +814,7 @@ pub mod tests {
                 Some(rng),
                 &mut fs_rng,
             )?;
-            let mut fs_rng = PC::setup_oracle();
+            let mut fs_rng = PC::RandomOracle::from_seed(&to_bytes![&PC::PROTOCOL_NAME].unwrap());
             let result = PC::batch_check(
                 &vk,
                 &comms,
@@ -845,7 +847,7 @@ pub mod tests {
                 ..
             } = get_data_for_verifier::<F, PC>(info, None).unwrap();
 
-            let mut fs_rng = PC::setup_oracle();
+            let mut fs_rng = PC::RandomOracle::from_seed(&to_bytes![&PC::PROTOCOL_NAME].unwrap());
             let result = PC::batch_check(
                 &vk,
                 &comms,
@@ -1003,7 +1005,7 @@ pub mod tests {
             println!("Generated query set");
             println!("Linear combinations: {:?}", linear_combinations);
 
-            let mut fs_rng = PC::setup_oracle();
+            let mut fs_rng = PC::RandomOracle::from_seed(&to_bytes![&PC::PROTOCOL_NAME].unwrap());
             let proof = PC::open_combinations(
                 &ck,
                 &linear_combinations,
@@ -1017,7 +1019,7 @@ pub mod tests {
 
             println!("Generated proof");
 
-            let mut fs_rng = PC::setup_oracle();
+            let mut fs_rng = PC::RandomOracle::from_seed(&to_bytes![&PC::PROTOCOL_NAME].unwrap());
             let result = PC::check_combinations(
                 &vk,
                 &linear_combinations,
