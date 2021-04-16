@@ -19,6 +19,10 @@ pub use algebra_utils::fft::DensePolynomial as Polynomial;
 use std::iter::FromIterator;
 use rand_core::RngCore;
 
+/// Implements a Fiat-Shamir based Rng that allows one to incrementally update
+/// the seed based on new messages in the proof transcript.
+pub mod rng;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     rc::Rc,
@@ -33,6 +37,8 @@ pub use data_structures::*;
 /// Errors pertaining to query sets.
 pub mod error;
 pub use error::*;
+
+use crate::rng::FiatShamirRng;
 
 /// A random number generator that bypasses some limitations of the Rust borrow
 /// checker.
@@ -94,7 +100,8 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     type BatchProof: BatchPCProof + Clone;
     /// The error type for the scheme.
     type Error: std::error::Error + From<Error>;
-
+    /// Source of random data
+    type RandomOracle: FiatShamirRng;
     /// Constructs public parameters when given as input the maximum degree `degree`
     /// for the polynomial commitment scheme.
     fn setup(
@@ -136,7 +143,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         point: F,
-        opening_challenge: F,
+        fs_rng: &mut Self::RandomOracle,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<Self::Proof, Self::Error>
@@ -144,13 +151,12 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             Self::Randomness: 'a,
             Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::open_individual_opening_challenges(
             ck,
             labeled_polynomials,
             commitments,
             point,
-            &opening_challenges,
+            fs_rng,
             rands,
             rng,
         )
@@ -163,7 +169,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
-        opening_challenge: F,
+        fs_rng: &mut Self::RandomOracle,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<Self::BatchProof, Self::Error>
@@ -171,13 +177,12 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             Self::Randomness: 'a,
             Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::batch_open_individual_opening_challenges(
             ck,
             labeled_polynomials,
             commitments,
             query_set,
-            &opening_challenges,
+            fs_rng,
             rands,
             rng,
         )
@@ -191,19 +196,18 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         point: F,
         values: impl IntoIterator<Item = F>,
         proof: &Self::Proof,
-        opening_challenge: F,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::check_individual_opening_challenges(
             vk,
             commitments,
             point,
             values,
             proof,
-            &opening_challenges,
+            fs_rng,
         )
     }
 
@@ -215,19 +219,18 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         query_set: &QuerySet<F>,
         evaluations: &Evaluations<F>,
         proof: &Self::BatchProof,
-        opening_challenge: F,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::batch_check_individual_opening_challenges(
             vk,
             commitments,
             query_set,
             evaluations,
             proof,
-            &opening_challenges,
+            fs_rng,
         )
     }
 
@@ -240,7 +243,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
-        opening_challenge: F,
+        fs_rng: &mut Self::RandomOracle,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<BatchLCProof<F, Self>, Self::Error>
@@ -248,14 +251,13 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             Self::Randomness: 'a,
             Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::open_combinations_individual_opening_challenges(
             ck,
             linear_combinations,
             polynomials,
             commitments,
             query_set,
-            &opening_challenges,
+            fs_rng,
             rands,
             rng,
         )
@@ -270,12 +272,11 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         eqn_query_set: &QuerySet<F>,
         eqn_evaluations: &Evaluations<F>,
         proof: &BatchLCProof<F, Self>,
-        opening_challenge: F,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::check_combinations_individual_opening_challenges(
             vk,
             linear_combinations,
@@ -283,7 +284,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             eqn_query_set,
             eqn_evaluations,
             proof,
-            &opening_challenges,
+            fs_rng,
         )
     }
 
@@ -293,7 +294,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         point: F,
-        opening_challenges: &dyn Fn(u64) -> F,
+        fs_rng: &mut Self::RandomOracle,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<Self::Proof, Self::Error>
@@ -307,7 +308,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
-        opening_challenges: &dyn Fn(u64) -> F,
+        fs_rng: &mut Self::RandomOracle,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<Self::BatchProof, Self::Error>
@@ -322,7 +323,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         point: F,
         values: impl IntoIterator<Item = F>,
         proof: &Self::Proof,
-        opening_challenges: &dyn Fn(u64) -> F,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a;
@@ -334,7 +335,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         query_set: &QuerySet<F>,
         evaluations: &Evaluations<F>,
         proof: &Self::BatchProof,
-        opening_challenges: &dyn Fn(u64) -> F,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a;
@@ -346,7 +347,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
-        opening_challenges: &dyn Fn(u64) -> F,
+        fs_rng: &mut Self::RandomOracle,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<BatchLCProof<F, Self>, Self::Error>
@@ -364,7 +365,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             polynomials,
             commitments,
             &poly_query_set,
-            opening_challenges,
+            fs_rng,
             rands,
             rng,
         )?;
@@ -382,7 +383,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         eqn_query_set: &QuerySet<F>,
         eqn_evaluations: &Evaluations<F>,
         proof: &BatchLCProof<F, Self>,
-        opening_challenges: &dyn Fn(u64) -> F,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a,
@@ -433,7 +434,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             &poly_query_set,
             &poly_evals,
             proof,
-            opening_challenges,
+            fs_rng,
         )?;
 
         if !pc_result {
@@ -583,23 +584,24 @@ pub mod tests {
             }
             println!("Generated query set");
 
-            let opening_challenge = F::rand(rng);
+            let mut fs_rng = PC::RandomOracle::new();
             let proof = PC::batch_open(
                 &ck,
                 &polynomials,
                 &comms,
                 &query_set,
-                opening_challenge,
+                &mut fs_rng,
                 &rands,
                 Some(rng),
             )?;
+            let mut fs_rng = PC::RandomOracle::new();
             let result = PC::batch_check(
                 &vk,
                 &comms,
                 &query_set,
                 &values,
                 &proof,
-                opening_challenge,
+                &mut fs_rng
             )?;
             assert!(result, "proof was incorrect, Query set: {:#?}", query_set);
         }
@@ -728,24 +730,25 @@ pub mod tests {
             }
             println!("Generated query set");
 
-            let opening_challenge = F::rand(rng);
+            let mut fs_rng = PC::RandomOracle::new();
             let proof = PC::batch_open(
                 &ck,
                 &polynomials,
                 &comms,
                 &query_set,
-                opening_challenge,
+                &mut fs_rng,
                 &rands,
                 Some(rng),
             )?;
 
+            let mut fs_rng = PC::RandomOracle::new();
             let result = PC::batch_check(
                 &vk,
                 &comms,
                 &query_set,
                 &values,
                 &proof,
-                opening_challenge,
+                &mut fs_rng
             )?;
             if !result {
                 println!(
@@ -893,18 +896,21 @@ pub mod tests {
             println!("Generated query set");
             println!("Linear combinations: {:?}", linear_combinations);
 
-            let opening_challenge = F::rand(rng);
+            let mut fs_rng = PC::RandomOracle::new();
             let proof = PC::open_combinations(
                 &ck,
                 &linear_combinations,
                 &polynomials,
                 &comms,
                 &query_set,
-                opening_challenge,
+                &mut fs_rng,
                 &rands,
                 Some(rng),
             )?;
+
             println!("Generated proof");
+
+            let mut fs_rng = PC::RandomOracle::new();
             let result = PC::check_combinations(
                 &vk,
                 &linear_combinations,
@@ -912,8 +918,9 @@ pub mod tests {
                 &query_set,
                 &values,
                 &proof,
-                opening_challenge,
+                &mut fs_rng,
             )?;
+
             if !result {
                 println!(
                     "Failed with {} polynomials, num_points_in_query_set: {:?}",
