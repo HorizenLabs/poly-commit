@@ -28,10 +28,12 @@ impl<G: AffineCurve> PCUniversalParams for UniversalParams<G> {
 /// polynomial.
 #[derive(Derivative)]
 #[derivative(
-    Default(bound = ""),
-    Hash(bound = ""),
-    Clone(bound = ""),
-    Debug(bound = "")
+Default(bound = ""),
+Hash(bound = ""),
+Clone(bound = ""),
+Debug(bound = ""),
+Eq(bound = ""),
+PartialEq(bound = ""),
 )]
 pub struct CommitterKey<G: AffineCurve> {
     /// The key used to commit to polynomials.
@@ -84,17 +86,16 @@ impl<G: AffineCurve> PCPreparedVerifierKey<VerifierKey<G>> for PreparedVerifierK
 /// Commitment to a polynomial that optionally enforces a degree bound.
 #[derive(Derivative)]
 #[derivative(
-    Default(bound = ""),
-    Hash(bound = ""),
-    Clone(bound = ""),
-    Copy(bound = ""),
-    Debug(bound = ""),
-    PartialEq(bound = ""),
-    Eq(bound = "")
+Default(bound = ""),
+Hash(bound = ""),
+Clone(bound = ""),
+Debug(bound = ""),
+PartialEq(bound = ""),
+Eq(bound = "")
 )]
 pub struct Commitment<G: AffineCurve> {
     /// A Pedersen commitment to the polynomial.
-    pub comm: G,
+    pub comm: Vec<G>,
 
     /// A Pedersen commitment to the shifted polynomial.
     /// This is `none` if the committed polynomial does not
@@ -106,7 +107,7 @@ impl<G: AffineCurve> PCCommitment for Commitment<G> {
     #[inline]
     fn empty() -> Self {
         Commitment {
-            comm: G::zero(),
+            comm: vec![G::zero()],
             shifted_comm: None,
         }
     }
@@ -116,7 +117,7 @@ impl<G: AffineCurve> PCCommitment for Commitment<G> {
     }
 
     fn size_in_bytes(&self) -> usize {
-        to_bytes![G::zero()].unwrap().len() / 2
+        (to_bytes![G::zero()].unwrap().len() / 2) * self.comm.len()
     }
 }
 
@@ -146,31 +147,31 @@ impl<G: AffineCurve> PCPreparedCommitment<Commitment<G>> for PreparedCommitment<
 /// `Randomness` hides the polynomial inside a commitment and is outputted by `InnerProductArg::commit`.
 #[derive(Derivative)]
 #[derivative(
-    Default(bound = ""),
-    Hash(bound = ""),
-    Clone(bound = ""),
-    Debug(bound = ""),
-    PartialEq(bound = ""),
-    Eq(bound = "")
+Default(bound = ""),
+Hash(bound = ""),
+Clone(bound = ""),
+Debug(bound = ""),
+PartialEq(bound = ""),
+Eq(bound = "")
 )]
 pub struct Randomness<G: AffineCurve> {
     /// Randomness is some scalar field element.
-    pub rand: G::ScalarField,
+    pub rand: Vec<G::ScalarField>,
 
     /// Randomness applied to the shifted commitment is some scalar field element.
     pub shifted_rand: Option<G::ScalarField>,
 }
 
 impl<G: AffineCurve> PCRandomness for Randomness<G> {
-    fn empty() -> Self {
+    fn empty(segments_count: usize) -> Self {
         Self {
-            rand: G::ScalarField::zero(),
+            rand: vec![G::ScalarField::zero(); segments_count],
             shifted_rand: None,
         }
     }
 
-    fn rand<R: RngCore>(_num_queries: usize, has_degree_bound: bool, rng: &mut R) -> Self {
-        let rand = G::ScalarField::rand(rng);
+    fn rand<R: RngCore>(segments_count: usize, has_degree_bound: bool, rng: &mut R) -> Self {
+        let rand = (0..segments_count).map(|_| G::ScalarField::rand(rng)).collect::<Vec<_>>();
         let shifted_rand = if has_degree_bound {
             Some(G::ScalarField::rand(rng))
         } else {
@@ -184,10 +185,10 @@ impl<G: AffineCurve> PCRandomness for Randomness<G> {
 /// `Proof` is an evaluation proof that is output by `InnerProductArg::open`.
 #[derive(Derivative)]
 #[derivative(
-    Default(bound = ""),
-    Hash(bound = ""),
-    Clone(bound = ""),
-    Debug(bound = "")
+Default(bound = ""),
+Hash(bound = ""),
+Clone(bound = ""),
+Debug(bound = "")
 )]
 pub struct Proof<G: AffineCurve> {
     /// Vector of left elements for each of the log_d iterations in `open`
@@ -240,10 +241,10 @@ impl<G: AffineCurve> ToBytes for Proof<G> {
 /// IACR preprint 2020/81 https://eprint.iacr.org/2020/081
 #[derive(Derivative)]
 #[derivative(
-    Default(bound = ""),
-    Hash(bound = ""),
-    Clone(bound = ""),
-    Debug(bound = "")
+Default(bound = ""),
+Hash(bound = ""),
+Clone(bound = ""),
+Debug(bound = "")
 )]
 pub struct BatchProof<G: AffineCurve> {
 
@@ -252,9 +253,9 @@ pub struct BatchProof<G: AffineCurve> {
     pub proof: Proof<G>,
 
     /// Commitment of the h(X) polynomial
-    pub batch_commitment: G, 
+    pub batch_commitment: Vec<G>,
 
-    /// Values: v_i = p_i(x), where x is fresh random challenge
+    /// Values: v_i = p(x_i), where the query points x_i are not necessarily distinct.
     pub batch_values: BTreeMap<String, G::ScalarField>
 }
 
@@ -272,29 +273,39 @@ impl<G: AffineCurve> ToBytes for BatchProof<G> {
         self.batch_values.values().collect::<Vec<&G::ScalarField>>().write(&mut writer)
     }
 }
+
 /// `SuccinctCheckPolynomial` is a succinctly-representated polynomial
 /// generated from the `log_d` random oracle challenges generated in `open`.
 /// It has the special property that can be evaluated in `O(log_d)` time.
+#[derive(Clone)]
 pub struct SuccinctCheckPolynomial<F: Field>(pub Vec<F>);
 
 impl<F: Field> SuccinctCheckPolynomial<F> {
-    /// Computes the coefficients of the underlying degree `d` polynomial.
-    pub fn compute_coeffs(&self) -> Vec<F> {
+
+    /// Slighlty optimized way to compute it, taken from
+    /// [o1-labs/marlin](https://github.com/o1-labs/marlin/blob/master/dlog/commitment/src/commitment.rs#L175)
+    fn _compute_succinct_poly_coeffs(&self, mut init_coeffs: Vec<F>) -> Vec<F> {
         let challenges = &self.0;
         let log_d = challenges.len();
-
-        let mut coeffs = vec![F::one(); 1 << log_d];
-        for (i, challenge) in challenges.iter().enumerate() {
-            let i = i + 1;
-            let elem_degree = 1 << (log_d - i);
-            for start in (elem_degree..coeffs.len()).step_by(elem_degree * 2) {
-                for offset in 0..elem_degree {
-                    coeffs[start + offset] *= challenge;
-                }
-            }
+        let mut k: usize = 0;
+        let mut pow: usize = 1;
+        for i in 1..1 << log_d {
+            k += if i == pow { 1 } else { 0 };
+            pow <<= if i == pow { 1 } else { 0 };
+            init_coeffs[i] = init_coeffs[i - (pow >> 1)] * challenges[log_d - 1 - (k - 1)];
         }
+        init_coeffs
+    }
 
-        coeffs
+    /// Computes the coefficients of the underlying degree `d` polynomial.
+    pub fn compute_coeffs(&self) -> Vec<F> {
+        self._compute_succinct_poly_coeffs(vec![F::one(); 1 << self.0.len()])
+    }
+
+    /// Computes the coefficients of the underlying degree `d` polynomial, scaled by
+    /// a factor `scale`.
+    pub fn compute_scaled_coeffs(&self, scale: F) -> Vec<F> {
+        self._compute_succinct_poly_coeffs(vec![scale; 1 << self.0.len()])
     }
 
     /// Evaluate `self` at `point` in time `O(log_d)`.

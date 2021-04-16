@@ -1,12 +1,12 @@
-use crate::{BTreeMap, String, ToString, Vec};
-use crate::{BatchLCProof, Error, Evaluations, QuerySet};
-use crate::{LabeledCommitment, LabeledPolynomial, LinearCombination};
+use crate::{BTreeMap, ToString, Vec};
+use crate::{Error, Evaluations, QuerySet};
+use crate::{LabeledCommitment, LabeledPolynomial, LabeledRandomness};
 use crate::{PCCommitterKey, PCRandomness, PCUniversalParams, Polynomial, PolynomialCommitment};
 
 use algebra_utils::msm::VariableBaseMSM;
 use algebra::{ToBytes, to_bytes, Field, PrimeField, UniformRand, Group, AffineCurve, ProjectiveCurve};
 use std::{format, vec};
-use std::{convert::TryInto, marker::PhantomData};
+use std::marker::PhantomData;
 use rand_core::RngCore;
 
 mod data_structures;
@@ -52,12 +52,11 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let scalars_bigint = scalars.par_iter()
             .map(|s| s.into_repr())
             .collect::<Vec<_>>();
-        let mut comm = VariableBaseMSM::multi_scalar_mul(comm_key, &scalars_bigint);
+        let mut comm = VariableBaseMSM::multi_scalar_mul(&comm_key, &scalars_bigint);
         if randomizer.is_some() {
             assert!(hiding_generator.is_some());
             comm += &hiding_generator.unwrap().mul(randomizer.unwrap());
         }
-
         comm
     }
 
@@ -92,6 +91,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     ) -> Option<SuccinctCheckPolynomial<G::ScalarField>> {
         let check_time = start_timer!(|| "Succinct checking");
 
+        let key_len = vk.comm_key.len();
+
         let d = vk.supported_degree();
 
         // `log_d` is ceil(log2 (d + 1)), which is the number of steps to compute all of the challenges
@@ -108,23 +109,53 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let values = values.into_iter();
 
         for (labeled_commitment, value) in labeled_commitments.zip(values) {
+            let label = labeled_commitment.label();
             let commitment = labeled_commitment.commitment();
             combined_v += &(cur_challenge * &value);
-            combined_commitment_proj += &labeled_commitment.commitment().comm.mul(cur_challenge);
+
+            let segments_count = commitment.comm.len();
+
+            let mut comm_lc = <G::Projective as ProjectiveCurve>::zero();
+            for (i, comm_single) in commitment.comm.iter().enumerate() {
+                let is = i * key_len;
+                comm_lc += &comm_single.mul(point.pow(&[is as u64]));
+            }
+            combined_commitment_proj += &comm_lc.mul(&cur_challenge);
+
             cur_challenge = opening_challenges(opening_challenge_counter);
             opening_challenge_counter += 1;
 
             let degree_bound = labeled_commitment.degree_bound();
-            assert_eq!(degree_bound.is_some(), commitment.shifted_comm.is_some());
 
-            if let Some(degree_bound) = degree_bound {
-                let shift = point.pow([(vk.supported_degree() - degree_bound) as u64]);
-                combined_v += &(cur_challenge * &value * &shift);
+            // If the degree_bound is a multiple of the key_len then there is no need to prove the degree bound polynomial identity.
+            let degree_bound_len = degree_bound.and_then(|degree_bound_len| {
+                if (degree_bound_len + 1) % key_len != 0 { Some(degree_bound_len + 1) } else { None }
+            });
+
+            assert_eq!(
+                degree_bound_len.is_some(),
+                commitment.shifted_comm.is_some()
+            );
+
+            if let Some(degree_bound_len) = degree_bound_len {
+
+                if Self::check_segments_and_bounds(
+                    degree_bound.unwrap(),
+                    segments_count,
+                    key_len,
+                    label.clone(),
+                ).is_err() {
+                    return None;
+                }
+
+                let shifted_degree_bound = degree_bound_len % key_len - 1;
+                let shift = -point.pow(&[(key_len - shifted_degree_bound - 1) as u64]);
                 combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
-            }
+                combined_commitment_proj += &commitment.comm[segments_count - 1].mul(cur_challenge * &shift);
 
-            cur_challenge = opening_challenges(opening_challenge_counter);
-            opening_challenge_counter += 1;
+                cur_challenge = opening_challenges(opening_challenge_counter);
+                opening_challenge_counter += 1;
+            }
         }
 
         let mut combined_commitment = combined_commitment_proj.into_affine();
@@ -176,26 +207,163 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
         if !ProjectiveCurve::is_zero(&(round_commitment_proj - &check_commitment_elem)) {
             end_timer!(check_time);
-            return None;
+            if cfg!(feature = "bench") { return Some(check_poly) } else { return None }
         }
 
         end_timer!(check_time);
         Some(check_poly)
     }
 
+    /// Perform the succinct check of proof, returning the succinct check polynomial (the xi_s)
+    /// and the GFinal.
+    fn succinct_batch_check_individual_opening_challenges<'a, R: RngCore>(
+        vk: &VerifierKey<G>,
+        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Commitment<G>>>,
+        query_set: &QuerySet<G::ScalarField>,
+        values: &Evaluations<G::ScalarField>,
+        batch_proof: &BatchProof<G>,
+        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
+        _rng: &mut R,
+    ) -> Result<(SuccinctCheckPolynomial<G::ScalarField>, G), Error>
+    {
+        let commitments: Vec<&'a LabeledCommitment<Commitment<G>>> = commitments.into_iter().map(|comm| comm).collect();
+
+        let batch_check_time = start_timer!(|| "Multi poly multi point batch check: succinct part");
+        let evals_time = start_timer!(|| "Compute batched poly value");
+
+        // v_i values
+        let mut v_values = vec![];
+
+        // y_i values
+        let mut y_values = vec![];
+
+        // x_i values
+        let mut points = vec![];
+
+        for (label, (_point_label, point)) in query_set.iter() {
+
+            let y_i = values
+                .get(&(label.clone(), *point))
+                .ok_or(Error::MissingEvaluation {
+                    label: label.to_string(),
+                })?;
+            let v_i = batch_proof.batch_values
+                .get(&label.clone())
+                .ok_or(Error::MissingEvaluation {
+                    label: label.to_string(),
+                })?;
+            v_values.push(*v_i);
+            y_values.push(*y_i);
+            points.push(point);
+        }
+
+        // Commitment of the h(X) polynomial
+        let batch_commitment = batch_proof.batch_commitment.clone();
+
+        // TODO: When we will move to Sponge-based construction, we will absorb the
+        //       batch_commitment only and then squeeze a new challenge
+        // Fresh random challenge x
+        let point = Self::compute_random_oracle_challenge(
+            &to_bytes![
+                batch_commitment,
+                points
+            ]
+                .unwrap(),
+        );
+
+        let mut opening_challenge_counter = 0;
+
+        // lambda
+        let mut cur_challenge = opening_challenges(opening_challenge_counter);
+        opening_challenge_counter += 1;
+
+        let mut computed_batch_v = G::ScalarField::zero();
+
+        for ((&v_i, y_i), x_i) in v_values.iter().zip(y_values).zip(points) {
+
+            computed_batch_v = computed_batch_v + &(cur_challenge * &((v_i - &y_i) / &(point - x_i)));
+
+            cur_challenge = opening_challenges(opening_challenge_counter);
+            opening_challenge_counter += 1;
+        }
+
+        let mut batch_values = vec![];
+        for commitment in commitments.iter() {
+            let value = batch_proof.batch_values
+                .get(commitment.label())
+                .ok_or(Error::MissingEvaluation {
+                    label: commitment.label().to_string(),
+                })?;
+            batch_values.push(*value);
+        }
+
+        // Reconstructed v value added to the check
+        batch_values.push(computed_batch_v);
+
+        // The commitment to h(X) polynomial added to the check
+        let mut commitments = commitments;
+        let labeled_batch_commitment = LabeledCommitment::new(
+            format!("Batch"),
+            Commitment { comm: batch_commitment.clone(), shifted_comm: None },
+            None
+        );
+        commitments.push(&labeled_batch_commitment);
+
+        let proof = &batch_proof.proof;
+        end_timer!(evals_time);
+
+        let check_time = start_timer!(|| "Succinct check batched polynomial");
+        let opening_challenge = Self::compute_random_oracle_challenge(
+            &to_bytes![
+                batch_proof.batch_values.values().collect::<Vec<&G::ScalarField>>(),
+                batch_commitment,
+                point
+            ]
+                .unwrap(),
+        );
+        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
+
+        let d = vk.supported_degree();
+
+        // `log_d` is ceil(log2 (d + 1)), which is the number of steps to compute all of the challenges
+        let log_d = algebra::log2(d + 1) as usize;
+
+        if proof.l_vec.len() != proof.r_vec.len() || proof.l_vec.len() != log_d {
+            return Err(Error::IncorrectInputLength(
+                format!(
+                    "Expected proof vectors to be {:}. Instead, l_vec size is {:} and r_vec size is {:}",
+                    log_d,
+                    proof.l_vec.len(),
+                    proof.r_vec.len()
+                )
+            ));
+        }
+
+        let check_poly = Self::succinct_check(vk, commitments, point, batch_values, proof, &opening_challenges);
+
+        if check_poly.is_none() {
+            end_timer!(check_time);
+            return Err(Error::FailedSuccinctCheck);
+        }
+
+        end_timer!(check_time);
+        end_timer!(batch_check_time);
+
+        Ok((check_poly.unwrap(), proof.final_comm_key))
+    }
+
     fn check_degrees_and_bounds(
         supported_degree: usize,
         p: &LabeledPolynomial<G::ScalarField>,
     ) -> Result<(), Error> {
-        if p.degree() > supported_degree {
-            return Err(Error::TooManyCoefficients {
-                num_coefficients: p.degree() + 1,
-                num_powers: supported_degree + 1,
-            });
-        }
 
         if let Some(bound) = p.degree_bound() {
-            if bound < p.degree() || bound > supported_degree {
+
+            let p_len = p.polynomial().coeffs.len();
+            let segment_len = supported_degree + 1;
+            let segments_count = std::cmp::max(1, p_len / segment_len + if p_len % segment_len != 0 { 1 } else { 0 });
+
+            if bound < p.degree() {
                 return Err(Error::IncorrectDegreeBound {
                     poly_degree: p.degree(),
                     degree_bound: bound,
@@ -203,6 +371,34 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
                     label: p.label().to_string(),
                 });
             }
+
+            return Self::check_segments_and_bounds(
+                bound,
+                segments_count,
+                segment_len,
+                p.label().to_string()
+            );
+        }
+
+        Ok(())
+    }
+
+    fn check_segments_and_bounds(
+        bound: usize,
+        segments_count: usize,
+        segment_len: usize,
+        label: String
+    ) -> Result<(), Error> {
+
+        if (bound + 1) <= (segments_count-1) * segment_len ||
+            (bound + 1) > segments_count * segment_len
+        {
+            return Err(Error::IncorrectSegmentedDegreeBound {
+                degree_bound: bound,
+                segments_count,
+                segment_len,
+                label,
+            });
         }
 
         Ok(())
@@ -221,67 +417,6 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             shifted_polynomial_coeffs.extend_from_slice(&p.coeffs);
             Polynomial::from_coefficients_vec(shifted_polynomial_coeffs)
         }
-    }
-
-    fn combine_shifted_rand(
-        combined_rand: Option<G::ScalarField>,
-        new_rand: Option<G::ScalarField>,
-        coeff: G::ScalarField,
-    ) -> Option<G::ScalarField> {
-        if let Some(new_rand) = new_rand {
-            let coeff_new_rand = new_rand * &coeff;
-            return Some(combined_rand.map_or(coeff_new_rand, |r| r + &coeff_new_rand));
-        };
-
-        combined_rand
-    }
-
-    fn combine_shifted_comm(
-        combined_comm: Option<G::Projective>,
-        new_comm: Option<G>,
-        coeff: G::ScalarField,
-    ) -> Option<G::Projective> {
-        if let Some(new_comm) = new_comm {
-            let coeff_new_comm = new_comm.mul(coeff);
-            return Some(combined_comm.map_or(coeff_new_comm, |c| c + &coeff_new_comm));
-        };
-
-        combined_comm
-    }
-
-    fn construct_labeled_commitments(
-        lc_info: &[(String, Option<usize>)],
-        elements: &[G::Projective],
-    ) -> Vec<LabeledCommitment<Commitment<G>>> {
-        let comms = G::Projective::batch_normalization_into_affine(elements.to_vec());
-        let mut commitments = Vec::new();
-
-        let mut i = 0;
-        for info in lc_info.into_iter() {
-            let commitment;
-            let label = info.0.clone();
-            let degree_bound = info.1;
-
-            if degree_bound.is_some() {
-                commitment = Commitment {
-                    comm: comms[i].clone(),
-                    shifted_comm: Some(comms[i + 1].clone()),
-                };
-
-                i += 2;
-            } else {
-                commitment = Commitment {
-                    comm: comms[i].clone(),
-                    shifted_comm: None,
-                };
-
-                i += 1;
-            }
-
-            commitments.push(LabeledCommitment::new(label, commitment, degree_bound));
-        }
-
-        return commitments;
     }
 
     fn sample_generators(num_generators: usize) -> Vec<G> {
@@ -431,7 +566,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
     ) -> Result<
         (
             Vec<LabeledCommitment<Self::Commitment>>,
-            Vec<Self::Randomness>,
+            Vec<LabeledRandomness<Self::Randomness>>,
         ),
         Self::Error,
     > {
@@ -456,35 +591,53 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 hiding_bound,
             ));
 
-            let randomness = if let Some(h) = hiding_bound {
-                Randomness::rand(h, degree_bound.is_some(), rng)
+            let key_len = ck.comm_key.len();
+            let p_len = polynomial.coeffs.len();
+            let segments_count = std::cmp::max(1, p_len / key_len + if p_len % key_len != 0 { 1 } else { 0 });
+
+            let randomness = if let Some(_) = hiding_bound {
+                Randomness::rand(segments_count, degree_bound.is_some(), rng)
             } else {
-                Randomness::empty()
+                Randomness::empty(segments_count)
             };
 
-            let comm = Self::cm_commit(
-                &ck.comm_key[..(polynomial.degree() + 1)],
-                &polynomial.coeffs,
-                Some(ck.s),
-                Some(randomness.rand),
-            )
-            .into_affine();
+            let comm: Vec<G>;
 
-            let shifted_comm = degree_bound.map(|d| {
-                Self::cm_commit(
-                    &ck.comm_key[(ck.supported_degree() - d)..],
-                    &polynomial.coeffs,
-                    Some(ck.s),
-                    randomness.shifted_rand,
-                )
-                .into_affine()
+            // split poly in segments and commit all of them without shifting
+            comm = (0..segments_count).into_iter().map(
+                |i| {
+                    Self::cm_commit(
+                        &ck.comm_key,
+                        &polynomial.coeffs[i * key_len..core::cmp::min((i + 1) * key_len, p_len)],
+                        Some(ck.s),
+                        Some(randomness.rand[i]),
+                    ).into_affine()
+                }
+            ).collect();
+
+            // committing only last segment shifted to the right edge
+            let shifted_comm = degree_bound.and_then(|degree_bound| {
+                let degree_bound_len = degree_bound + 1; // Convert to the maximum number of coefficients
+                if degree_bound_len % key_len != 0 {
+                    Some(
+                        Self::cm_commit(
+                            &ck.comm_key[key_len - (degree_bound_len % key_len)..],
+                            &polynomial.coeffs[(segments_count - 1) * key_len..p_len],
+                            Some(ck.s),
+                            randomness.shifted_rand,
+                        ).into_affine()
+                    )
+                } else {
+                    None
+                }
             });
 
             let commitment = Commitment { comm, shifted_comm };
             let labeled_comm = LabeledCommitment::new(label.to_string(), commitment, degree_bound);
+            let labeled_rand = LabeledRandomness::new(label.to_string(), randomness);
 
             comms.push(labeled_comm);
-            rands.push(randomness);
+            rands.push(labeled_rand);
 
             end_timer!(commit_time);
         }
@@ -499,13 +652,15 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         point: G::ScalarField,
         opening_challenges: &dyn Fn(u64) -> G::ScalarField,
-        rands: impl IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<Self::Proof, Self::Error>
-    where
-        Self::Commitment: 'a,
-        Self::Randomness: 'a,
+        where
+            Self::Commitment: 'a,
+            Self::Randomness: 'a,
     {
+        let key_len = ck.comm_key.len();
+
         let mut combined_polynomial = Polynomial::zero();
         let mut combined_rand = G::ScalarField::zero();
         let mut combined_commitment_proj = <G::Projective as ProjectiveCurve>::zero();
@@ -522,8 +677,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let mut cur_challenge = opening_challenges(opening_challenge_counter);
         opening_challenge_counter += 1;
 
-        for (labeled_polynomial, (labeled_commitment, randomness)) in
-            polys_iter.zip(comms_iter.zip(rands_iter))
+        for (labeled_polynomial, (labeled_commitment, labeled_randomness)) in
+        polys_iter.zip(comms_iter.zip(rands_iter))
         {
             let label = labeled_polynomial.label();
             assert_eq!(labeled_polynomial.label(), labeled_commitment.label());
@@ -533,22 +688,18 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             let degree_bound = labeled_polynomial.degree_bound();
             let hiding_bound = labeled_polynomial.hiding_bound();
             let commitment = labeled_commitment.commitment();
+            let randomness = labeled_randomness.randomness();
 
-            combined_polynomial += (cur_challenge, polynomial);
-            combined_commitment_proj += &commitment.comm.mul(cur_challenge);
+            let p_len = polynomial.coeffs.len();
+            let segments_count = std::cmp::max(1, p_len / key_len + if p_len % key_len != 0 { 1 } else { 0 });
 
-            if hiding_bound.is_some() {
-                has_hiding = true;
-                combined_rand += &(cur_challenge * &randomness.rand);
-            }
-
-            cur_challenge = opening_challenges(opening_challenge_counter);
-            opening_challenge_counter += 1;
-
-            let has_degree_bound = degree_bound.is_some();
+            // If the degree_bound is a multiple of the key_len then there is no need to prove the degree bound polynomial identity.
+            let degree_bound_len = degree_bound.and_then(|degree_bound| {
+                if (degree_bound + 1) % key_len != 0 { Some(degree_bound + 1) } else { None }
+            });
 
             assert_eq!(
-                has_degree_bound,
+                degree_bound_len.is_some(),
                 commitment.shifted_comm.is_some(),
                 "shifted_comm mismatch for {}",
                 label
@@ -560,10 +711,56 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 "labeled_comm degree bound mismatch for {}",
                 label
             );
-            if let Some(degree_bound) = degree_bound {
-                let shifted_polynomial = Self::shift_polynomial(ck, polynomial, degree_bound);
+
+            if hiding_bound.is_some() {
+                has_hiding = true;
+            }
+
+            let mut polynomial_lc = Polynomial::zero();
+            let mut comm_lc = <G::Projective as ProjectiveCurve>::zero();
+            let mut rand_lc = G::ScalarField::zero();
+
+            for i in 0..segments_count {
+                let is = i * key_len;
+                let poly_single = Polynomial::from_coefficients_slice(
+                    &polynomial.coeffs[i * key_len..core::cmp::min((i + 1) * key_len, p_len)]
+                );
+                let comm_single = commitment.comm[i];
+                polynomial_lc += (point.pow(&[is as u64]), &poly_single);
+                comm_lc += &comm_single.mul(point.pow(&[is as u64]));
+                if has_hiding {
+                    let rand_single = randomness.rand[i];
+                    rand_lc += &(point.pow(&[is as u64]) * rand_single);
+                }
+            }
+
+            combined_polynomial += (cur_challenge, &polynomial_lc);
+            combined_commitment_proj += &comm_lc.mul(&cur_challenge);
+            if has_hiding {
+                combined_rand += &(cur_challenge * &rand_lc);
+            }
+
+            cur_challenge = opening_challenges(opening_challenge_counter);
+            opening_challenge_counter += 1;
+
+            if let Some(degree_bound_len) = degree_bound_len {
+
+                let shifted_degree_bound = degree_bound_len % key_len - 1;
+                let last_segment_polynomial = Polynomial::from_coefficients_slice(
+                    &polynomial.coeffs[(segments_count - 1) * key_len..p_len]
+                );
+                let shifted_polynomial = Self::shift_polynomial(
+                    ck,
+                    &last_segment_polynomial,
+                    shifted_degree_bound
+                );
+                let shift = -point.pow(&[(key_len - shifted_degree_bound - 1) as u64]);
+
                 combined_polynomial += (cur_challenge, &shifted_polynomial);
                 combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
+
+                combined_polynomial += (cur_challenge * &shift, &last_segment_polynomial);
+                combined_commitment_proj += &commitment.comm[segments_count - 1].mul(cur_challenge * &shift);
 
                 if hiding_bound.is_some() {
                     let shifted_rand = randomness.shifted_rand;
@@ -573,11 +770,12 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                         label
                     );
                     combined_rand += &(cur_challenge * &shifted_rand.unwrap());
+                    combined_rand += &(cur_challenge * &shift * &randomness.rand[segments_count - 1]);
                 }
-            }
 
-            cur_challenge = opening_challenges(opening_challenge_counter);
-            opening_challenge_counter += 1;
+                cur_challenge = opening_challenges(opening_challenge_counter);
+                opening_challenge_counter += 1;
+            }
         }
 
         end_timer!(combine_time);
@@ -622,7 +820,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                     combined_v,
                     hiding_commitment.unwrap()
                 ]
-                .unwrap(),
+                    .unwrap(),
             );
             combined_polynomial += (hiding_challenge, &hiding_polynomial);
             combined_rand += &(hiding_challenge * &hiding_rand);
@@ -742,23 +940,26 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<G::ScalarField>,
-        // TODO: In order to implement the Fiat-Shamir transform in a "clean" manner, we need to pass a sponge instead of opening_challenges(). This sponge is then used to squeeze the opening challenge(s) as well as the fresh query point x
+        // TODO: In order to implement the Fiat-Shamir transform in a "clean" manner,
+        //       we need to pass a sponge instead of opening_challenges().
+        //       This sponge is then used to squeeze the opening challenge(s) as well
+        //       as the fresh query point x
         opening_challenges: &dyn Fn(u64) -> G::ScalarField,
-        rands: impl IntoIterator<Item = &'a Self::Randomness>,
+        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
     ) -> Result<Self::BatchProof, Self::Error>
-    where
-        Self::Randomness: 'a,
-        Self::Commitment: 'a,
+        where
+            Self::Randomness: 'a,
+            Self::Commitment: 'a,
     {
         let labeled_polynomials: Vec<&'a LabeledPolynomial<G::ScalarField>> = labeled_polynomials.into_iter().map(|poly| poly).collect();
         let commitments: Vec<&'a LabeledCommitment<Self::Commitment>> = commitments.into_iter().map(|comm| comm).collect();
-        let rands: Vec<&'a Self::Randomness> = rands.into_iter().map(|rand| rand).collect();
+        let rands: Vec<&'a LabeledRandomness<Self::Randomness>> = rands.into_iter().map(|rand| rand).collect();
 
         let batch_time = start_timer!(|| "Multi poly multi point batching.");
 
         let mut opening_challenge_counter = 0;
-        
+
         // lambda
         let mut cur_challenge = opening_challenges(opening_challenge_counter);
         opening_challenge_counter += 1;
@@ -768,6 +969,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             .map(|poly| (poly.label(), poly))
             .collect();
 
+        let mut has_hiding = false;
         let mut points = vec![];
 
         // h(X)
@@ -780,20 +982,24 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                     label: label.to_string(),
                 })?;
 
+            if labeled_polynomial.hiding_bound().is_some() {
+                has_hiding = true;
+            }
+
             points.push(point);
 
             // y_i
-            let evaluated_y = labeled_polynomial.polynomial().evaluate(*point); 
+            let evaluated_y = labeled_polynomial.polynomial().evaluate(*point);
 
             // (p_i(X) - y_i) / (X - x_i)
-            let polynomial = 
-                &(labeled_polynomial.polynomial() - &Polynomial::from_coefficients_vec(vec![evaluated_y])) 
-                / 
-                &Polynomial::from_coefficients_vec(vec![
-                    (G::ScalarField::zero() - point), 
-                    G::ScalarField::one()
-                ]);
-            
+            let polynomial =
+                &(labeled_polynomial.polynomial() - &Polynomial::from_coefficients_vec(vec![evaluated_y]))
+                    /
+                    &Polynomial::from_coefficients_vec(vec![
+                        (G::ScalarField::zero() - point),
+                        G::ScalarField::one()
+                    ]);
+
             // h(X) = SUM( lambda^i * ((p_i(X) - y_i) / (X - x_i)) )
             batch_polynomial += (cur_challenge, &polynomial);
 
@@ -802,22 +1008,54 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             opening_challenge_counter += 1;
         }
 
-        // Commitment of the h(X) polynomial
-        let batch_commitment = Self::cm_commit(
-            ck.comm_key.as_slice(),
-            batch_polynomial.coeffs.as_slice(),
-            None,
-            None,
-        ).into_affine();
+        let key_len = ck.comm_key.len();
+        let p_len = batch_polynomial.coeffs.len();
+        let segments_count = std::cmp::max(1, p_len / key_len + if p_len % key_len != 0 { 1 } else { 0 });
 
-        // TODO: When we will move to Sponge-based construction, we will absorb the batch_commitment only and then squeeze a new challenge
+        let batch_randomness = if has_hiding {
+            Randomness::rand(segments_count, false, &mut rand::thread_rng())
+        } else {
+            Randomness::empty(segments_count)
+        };
+
+        // Commitment of the h(X) polynomial
+        let batch_commitment: Vec<G>;
+
+        if p_len > key_len {
+
+            batch_commitment = (0..segments_count).into_iter().map(
+                |i| {
+                    Self::cm_commit(
+                        &ck.comm_key,
+                        &batch_polynomial.coeffs[i * key_len..core::cmp::min((i + 1) * key_len, p_len)],
+                        Some(ck.s),
+                        Some(batch_randomness.rand[i]),
+                    ).into_affine()
+                }
+            ).collect();
+
+        } else {
+
+            batch_commitment = vec![
+                Self::cm_commit(
+                    ck.comm_key.as_slice(),
+                    batch_polynomial.coeffs.as_slice(),
+                    Some(ck.s),
+                    Some(batch_randomness.rand[0]),
+                ).into_affine()
+            ];
+        }
+
+
+        // TODO: When we will move to Sponge-based construction, we will absorb the batch_commitment
+        //       only and then squeeze a new challenge
         // Fresh random challenge x
         let point= Self::compute_random_oracle_challenge(
             &to_bytes![
                 batch_commitment,
-                points                
+                points
             ]
-            .unwrap(),
+                .unwrap(),
         );
 
         // Values: v_i = p_i(x), where x is fresh random challenge
@@ -832,7 +1070,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             format!("Batch"),
             batch_polynomial,
             None,
-            None
+            if has_hiding { Some(1) } else { None }
         );
         labeled_polynomials.push(&labeled_batch_polynomial);
 
@@ -840,14 +1078,14 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let mut commitments = commitments;
         let labeled_batch_commitment = LabeledCommitment::new(
             format!("Batch"),
-            Commitment { comm: batch_commitment, shifted_comm: None },
+            Commitment { comm: batch_commitment.clone(), shifted_comm: None },
             None
         );
         commitments.push(&labeled_batch_commitment);
 
         let mut rands = rands;
-        let batch_randomness = Randomness::empty();
-        rands.push(&batch_randomness);
+        let labeled_batch_rand = LabeledRandomness::new(format!("Batch"), batch_randomness);
+        rands.push(&labeled_batch_rand);
 
         end_timer!(batch_time);
 
@@ -855,9 +1093,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             &to_bytes![
                 batch_values.values().collect::<Vec<&G::ScalarField>>(),
                 batch_commitment,
-                point               
+                point
             ]
-            .unwrap(),
+                .unwrap(),
         );
         let opening_challenges = |pow| opening_challenge.pow(&[pow]);
 
@@ -887,8 +1125,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         _rng: Option<&mut dyn RngCore>,
     ) -> Result<bool, Self::Error>
-    where
-        Self::Commitment: 'a,
+        where
+            Self::Commitment: 'a,
     {
         let check_time = start_timer!(|| "Checking evaluations");
         let d = vk.supported_degree();
@@ -914,14 +1152,21 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             return Ok(false);
         }
 
+        let check_poly_time = start_timer!(|| "Compute check poly");
         let check_poly_coeffs = check_poly.unwrap().compute_coeffs();
+        end_timer!(check_poly_time);
+
+        let hard_time = start_timer!(|| "DLOG hard part");
         let final_key = Self::cm_commit(
             vk.comm_key.as_slice(),
             check_poly_coeffs.as_slice(),
             None,
             None,
         );
+        end_timer!(hard_time);
+
         if !ProjectiveCurve::is_zero(&(final_key - &proof.final_comm_key.into_projective())) {
+            end_timer!(check_time);
             return Ok(false);
         }
 
@@ -935,302 +1180,43 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         query_set: &QuerySet<G::ScalarField>,
         evaluations: &Evaluations<G::ScalarField>,
         batch_proof: &Self::BatchProof,
-        // TODO: In order to implement the Fiat-Shamir transform in a "clean" manner, we need to pass a sponge instead of opening_challenges(). This sponge is then used to squeeze the opening challenge(s) as well as the fresh query point x
+        // TODO: In order to implement the Fiat-Shamir transform in a "clean" manner,
+        //       we need to pass a sponge instead of opening_challenges(). This sponge
+        //       is then used to squeeze the opening challenge(s) as well as the fresh
+        //       query point x
         opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rng: &mut R,
     ) -> Result<bool, Self::Error>
-    where
-        Self::Commitment: 'a,
+        where
+            Self::Commitment: 'a,
     {
-        let commitments: Vec<&'a LabeledCommitment<Self::Commitment>> = commitments.into_iter().map(|comm| comm).collect();
-
-        let batch_check_time = start_timer!(|| "Multi poly multi point check batching");
-
-        // v_i values
-        let mut v_values = vec![];
-
-        // y_i values
-        let mut y_values = vec![];
-
-        // x_i values
-        let mut points = vec![];
-
-        for (label, (_point_label, point)) in query_set.iter() {
-
-            let y_i = evaluations
-                .get(&(label.clone(), *point))
-                .ok_or(Error::MissingEvaluation {
-                    label: label.to_string(),
-                })?;
-            let v_i = batch_proof.batch_values
-                .get(&label.clone())
-                .ok_or(Error::MissingEvaluation {
-                    label: label.to_string(),
-                })?;
-            v_values.push(*v_i);
-            y_values.push(*y_i);
-            points.push(point);
-        }
-
-        // Commitment of the h(X) polynomial
-        let batch_commitment = batch_proof.batch_commitment;
-
-        // TODO: When we will move to Sponge-based construction, we will absorb the batch_commitment only and then squeeze a new challenge
-        // Fresh random challenge x
-        let point = Self::compute_random_oracle_challenge(
-            &to_bytes![
-                batch_commitment,
-                points                
-            ]
-            .unwrap(),
-        );
-
-        let mut opening_challenge_counter = 0;
-
-        // lambda
-        let mut cur_challenge = opening_challenges(opening_challenge_counter);
-        opening_challenge_counter += 1;
-
-        let mut computed_batch_v = G::ScalarField::zero();
-
-        for ((&v_i, y_i), x_i) in v_values.iter().zip(y_values).zip(points) {
-
-            computed_batch_v = computed_batch_v + &(cur_challenge * &((v_i - &y_i) / &(point - x_i))); 
-
-            cur_challenge = opening_challenges(opening_challenge_counter);
-            opening_challenge_counter += 1;
-        }
-
-        // Reconstructed v value added to the check
-        let mut values = batch_proof.batch_values.iter().map(|(_k, &v)| v).collect::<Vec<_>>();
-        values.push(computed_batch_v);
-
-        // The commitment to h(X) polynomial added to the check
-        let mut commitments = commitments;
-        let labeled_batch_commitment = LabeledCommitment::new(
-            format!("Batch"),
-            Commitment { comm: batch_commitment, shifted_comm: None },
-            None
-        );
-        commitments.push(&labeled_batch_commitment);
-
-        end_timer!(batch_check_time);
-
-        let proof = &batch_proof.proof;
-
-        let opening_challenge = Self::compute_random_oracle_challenge(
-            &to_bytes![
-                batch_proof.batch_values.values().collect::<Vec<&G::ScalarField>>(),
-                batch_commitment,
-                point               
-            ]
-            .unwrap(),
-        );
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
-
-        Self::check_individual_opening_challenges(
+        // DLOG "succinct" part
+        let (check_poly, proof_final_key) = Self::succinct_batch_check_individual_opening_challenges(
             vk,
             commitments,
-            point,
-            values,
-            proof,
-            &opening_challenges,
-            Some(rng)
-        )
-    }
-
-    fn open_combinations_individual_opening_challenges<'a>(
-        ck: &Self::CommitterKey,
-        lc_s: impl IntoIterator<Item = &'a LinearCombination<G::ScalarField>>,
-        polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
-        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
-        query_set: &QuerySet<G::ScalarField>,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
-        rands: impl IntoIterator<Item = &'a Self::Randomness>,
-        rng: Option<&mut dyn RngCore>,
-    ) -> Result<BatchLCProof<G::ScalarField, Self>, Self::Error>
-    where
-        Self::Randomness: 'a,
-        Self::Commitment: 'a,
-    {
-        let label_poly_map = polynomials
-            .into_iter()
-            .zip(rands)
-            .zip(commitments)
-            .map(|((p, r), c)| (p.label(), (p, r, c)))
-            .collect::<BTreeMap<_, _>>();
-
-        let mut lc_polynomials = Vec::new();
-        let mut lc_randomness = Vec::new();
-        let mut lc_commitments = Vec::new();
-        let mut lc_info = Vec::new();
-
-        for lc in lc_s {
-            let lc_label = lc.label().clone();
-            let mut poly = Polynomial::zero();
-            let mut degree_bound = None;
-            let mut hiding_bound = None;
-
-            let mut combined_comm = <G::Projective as ProjectiveCurve>::zero();
-            let mut combined_shifted_comm: Option<G::Projective> = None;
-
-            let mut combined_rand = G::ScalarField::zero();
-            let mut combined_shifted_rand: Option<G::ScalarField> = None;
-
-            let num_polys = lc.len();
-            for (coeff, label) in lc.iter().filter(|(_, l)| !l.is_one()) {
-                let label: &String = label.try_into().expect("cannot be one!");
-                let &(cur_poly, cur_rand, cur_comm) =
-                    label_poly_map.get(label).ok_or(Error::MissingPolynomial {
-                        label: label.to_string(),
-                    })?;
-
-                if num_polys == 1 && cur_poly.degree_bound().is_some() {
-                    assert!(
-                        coeff.is_one(),
-                        "Coefficient must be one for degree-bounded equations"
-                    );
-                    degree_bound = cur_poly.degree_bound();
-                } else if cur_poly.degree_bound().is_some() {
-                    eprintln!("Degree bound when number of equations is non-zero");
-                    return Err(Self::Error::EquationHasDegreeBounds(lc_label));
-                }
-
-                // Some(_) > None, always.
-                hiding_bound = std::cmp::max(hiding_bound, cur_poly.hiding_bound());
-                poly += (*coeff, cur_poly.polynomial());
-
-                combined_rand += &(cur_rand.rand * coeff);
-                combined_shifted_rand = Self::combine_shifted_rand(
-                    combined_shifted_rand,
-                    cur_rand.shifted_rand,
-                    *coeff,
-                );
-
-                let commitment = cur_comm.commitment();
-                combined_comm += &commitment.comm.mul(*coeff);
-                combined_shifted_comm = Self::combine_shifted_comm(
-                    combined_shifted_comm,
-                    commitment.shifted_comm,
-                    *coeff,
-                );
-            }
-
-            let lc_poly =
-                LabeledPolynomial::new(lc_label.clone(), poly, degree_bound, hiding_bound);
-            lc_polynomials.push(lc_poly);
-            lc_randomness.push(Randomness {
-                rand: combined_rand,
-                shifted_rand: combined_shifted_rand,
-            });
-
-            lc_commitments.push(combined_comm);
-            if let Some(combined_shifted_comm) = combined_shifted_comm {
-                lc_commitments.push(combined_shifted_comm);
-            }
-
-            lc_info.push((lc_label, degree_bound));
-        }
-
-        let lc_commitments = Self::construct_labeled_commitments(&lc_info, &lc_commitments);
-
-        let proof = Self::batch_open_individual_opening_challenges(
-            ck,
-            lc_polynomials.iter(),
-            lc_commitments.iter(),
-            &query_set,
+            query_set,
+            evaluations,
+            batch_proof,
             opening_challenges,
-            lc_randomness.iter(),
-            rng,
+            rng
         )?;
-        Ok(BatchLCProof { proof, evals: None })
-    }
 
-    /// Checks that `values` are the true evaluations at `query_set` of the polynomials
-    /// committed in `labeled_commitments`.
-    fn check_combinations_individual_opening_challenges<'a, R: RngCore>(
-        vk: &Self::VerifierKey,
-        lc_s: impl IntoIterator<Item = &'a LinearCombination<G::ScalarField>>,
-        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
-        query_set: &QuerySet<G::ScalarField>,
-        evaluations: &Evaluations<G::ScalarField>,
-        proof: &BatchLCProof<G::ScalarField, Self>,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
-        rng: &mut R,
-    ) -> Result<bool, Self::Error>
-    where
-        Self::Commitment: 'a,
-    {
-        let BatchLCProof { proof, .. } = proof;
-        let label_comm_map = commitments
-            .into_iter()
-            .map(|c| (c.label(), c))
-            .collect::<BTreeMap<_, _>>();
-
-        let mut lc_commitments = Vec::new();
-        let mut lc_info = Vec::new();
-        let mut evaluations = evaluations.clone();
-        for lc in lc_s {
-            let lc_label = lc.label().clone();
-            let num_polys = lc.len();
-
-            let mut degree_bound = None;
-            let mut combined_comm = <G::Projective as ProjectiveCurve>::zero();
-            let mut combined_shifted_comm: Option<G::Projective> = None;
-
-            for (coeff, label) in lc.iter() {
-                if label.is_one() {
-                    for (&(ref label, _), ref mut eval) in evaluations.iter_mut() {
-                        if label == &lc_label {
-                            **eval -= coeff;
-                        }
-                    }
-                } else {
-                    let label: &String = label.try_into().unwrap();
-                    let &cur_comm = label_comm_map.get(label).ok_or(Error::MissingPolynomial {
-                        label: label.to_string(),
-                    })?;
-
-                    if num_polys == 1 && cur_comm.degree_bound().is_some() {
-                        assert!(
-                            coeff.is_one(),
-                            "Coefficient must be one for degree-bounded equations"
-                        );
-                        degree_bound = cur_comm.degree_bound();
-                    } else if cur_comm.degree_bound().is_some() {
-                        return Err(Self::Error::EquationHasDegreeBounds(lc_label));
-                    }
-
-                    let commitment = cur_comm.commitment();
-                    combined_comm += &commitment.comm.mul(*coeff);
-                    combined_shifted_comm = Self::combine_shifted_comm(
-                        combined_shifted_comm,
-                        commitment.shifted_comm,
-                        *coeff,
-                    );
-                }
-            }
-
-            lc_commitments.push(combined_comm);
-
-            if let Some(combined_shifted_comm) = combined_shifted_comm {
-                lc_commitments.push(combined_shifted_comm);
-            }
-
-            lc_info.push((lc_label, degree_bound));
+        // DLOG hard part
+        let check_time = start_timer!(|| "DLOG hard part");
+        let check_poly_coeffs = check_poly.compute_coeffs();
+        let final_key = Self::cm_commit(
+            vk.comm_key.as_slice(),
+            check_poly_coeffs.as_slice(),
+            None,
+            None,
+        );
+        if !ProjectiveCurve::is_zero(&(final_key - &proof_final_key.into_projective())) {
+            end_timer!(check_time);
+            return Ok(false);
         }
 
-        let lc_commitments = Self::construct_labeled_commitments(&lc_info, &lc_commitments);
-
-        Self::batch_check_individual_opening_challenges(
-            vk,
-            &lc_commitments,
-            &query_set,
-            &evaluations,
-            proof,
-            opening_challenges,
-            rng,
-        )
+        end_timer!(check_time);
+        Ok(true)
     }
 }
 
@@ -1303,34 +1289,41 @@ mod tests {
     }
 
     #[test]
-    fn single_equation_test() {
+    fn segmented_test() {
         use crate::tests::*;
-        single_equation_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
+        segmented_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
 
-    #[test]
-    fn two_equation_test() {
-        use crate::tests::*;
-        two_equation_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
-        println!("Finished tweedle_dee-blake2s");
-    }
-
-    #[test]
-    fn two_equation_degree_bound_test() {
-        use crate::tests::*;
-        two_equation_degree_bound_test::<_, PC_DEE>()
-            .expect("test failed for tweedle_dee-blake2s");
-        println!("Finished tweedle_dee-blake2s");
-    }
-
-    #[test]
-    fn full_end_to_end_equation_test() {
-        use crate::tests::*;
-        full_end_to_end_equation_test::<_, PC_DEE>()
-            .expect("test failed for tweedle_dee-blake2s");
-        println!("Finished tweedle_dee-blake2s");
-    }
+    // #[test]
+    // fn single_equation_test() {
+    //     use crate::tests::*;
+    //     single_equation_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
+    //     println!("Finished tweedle_dee-blake2s");
+    // }
+    //
+    // #[test]
+    // fn two_equation_test() {
+    //     use crate::tests::*;
+    //     two_equation_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
+    //     println!("Finished tweedle_dee-blake2s");
+    // }
+    //
+    // #[test]
+    // fn two_equation_degree_bound_test() {
+    //     use crate::tests::*;
+    //     two_equation_degree_bound_test::<_, PC_DEE>()
+    //         .expect("test failed for tweedle_dee-blake2s");
+    //     println!("Finished tweedle_dee-blake2s");
+    // }
+    //
+    // #[test]
+    // fn full_end_to_end_equation_test() {
+    //     use crate::tests::*;
+    //     full_end_to_end_equation_test::<_, PC_DEE>()
+    //         .expect("test failed for tweedle_dee-blake2s");
+    //     println!("Finished tweedle_dee-blake2s");
+    // }
 
     #[test]
     #[should_panic]

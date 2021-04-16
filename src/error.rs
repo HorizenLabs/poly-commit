@@ -17,6 +17,13 @@ pub enum Error {
         label: String,
     },
 
+    /// `Evaluations` does not contain an evaluation for the polynomial labelled
+    /// `label` at a particular query.
+    MissingBatchEvaluation {
+        /// The label of the missing polynomial.
+        label: String,
+    },
+
     /// The LHS of the equation is empty.
     MissingLHS {
         /// The label of the equation.
@@ -77,11 +84,26 @@ pub enum Error {
         label: String,
     },
 
+    /// The degree bound is not "situated" in the last segment of polynomial
+    IncorrectSegmentedDegreeBound {
+        /// Degree bound.
+        degree_bound: usize,
+        /// Count of segments
+        segments_count: usize,
+        /// Length of a segment
+        segment_len: usize,
+        /// Index of the offending polynomial.
+        label: String,
+    },
+
     /// The inputs to `commit`, `open` or `verify` had incorrect lengths.
     IncorrectInputLength(String),
 
     /// The commitment was generated incorrectly, tampered with, or doesn't support the polynomial.
     MalformedCommitment(String),
+
+    /// Failed succinct check
+    FailedSuccinctCheck,
 }
 
 impl std::fmt::Display for Error {
@@ -95,6 +117,11 @@ impl std::fmt::Display for Error {
             Error::MissingEvaluation { label } => write!(
                 f,
                 "`QuerySet` refers to polynomial \"{}\", but `Evaluations` does not contain an evaluation for it.",
+                label
+            ),
+            Error::MissingBatchEvaluation { label } => write!(
+                f,
+                "`QuerySet` refers to polynomial \"{}\", but `BatchEvaluations` does not contain an evaluation for it.",
                 label
             ),
             Error::MissingLHS { label } => {
@@ -154,8 +181,21 @@ impl std::fmt::Display for Error {
                  supported degree ({:?})",
                 degree_bound, label, poly_degree, supported_degree
             ),
+            Error::IncorrectSegmentedDegreeBound {
+                degree_bound,
+                segments_count,
+                segment_len,
+                label,
+            } => write!(
+                f,
+                "the degree bound ({:?}) for the polynomial {} \
+                 is not in the last segment {:?} \
+                 with selgment length {:?}",
+                degree_bound, label, segments_count, segment_len
+            ),
             Error::IncorrectInputLength(err) => write!(f, "{}", err),
-            Error::MalformedCommitment(err) => write!(f, "{}", err)
+            Error::MalformedCommitment(err) => write!(f, "{}", err),
+            Error::FailedSuccinctCheck => write!(f, "Failed succinct check")
         }
     }
 }
