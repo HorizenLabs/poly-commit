@@ -117,7 +117,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// The evaluation proof for a single point.
     type Proof: PCProof + Clone;
     /// The evaluation proof for a query set.
-    type BatchProof: Clone + From<Vec<Self::Proof>> + Into<Vec<Self::Proof>>;
+    type BatchProof: BatchPCProof + Clone;
     /// The error type for the scheme.
     type Error: std::error::Error + From<Error>;
 
@@ -336,6 +336,20 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         Self::Randomness: 'a,
         Self::Commitment: 'a;
 
+    /// batch_open with individual challenges
+    fn batch_open_individual_opening_challenges<'a>(
+        ck: &Self::CommitterKey,
+        labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
+        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
+        query_set: &QuerySet<F>,
+        opening_challenges: &dyn Fn(u64) -> F,
+        rands: impl IntoIterator<Item = &'a Self::Randomness>,
+        rng: Option<&mut dyn RngCore>,
+    ) -> Result<Self::BatchProof, Self::Error>
+    where
+        Self::Randomness: 'a,
+        Self::Commitment: 'a;
+
     /// check but with individual challenges
     fn check_individual_opening_challenges<'a>(
         vk: &Self::VerifierKey,
@@ -360,58 +374,8 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         rng: &mut R,
     ) -> Result<bool, Self::Error>
     where
-        Self::Commitment: 'a,
-    {
-        let commitments: BTreeMap<_, _> = commitments.into_iter().map(|c| (c.label(), c)).collect();
-        let mut query_to_labels_map = BTreeMap::new();
-        for (label, (point_label, point)) in query_set.iter() {
-            let labels = query_to_labels_map
-                .entry(point_label)
-                .or_insert((point, BTreeSet::new()));
-            labels.1.insert(label);
-        }
-
-        // Implicit assumption: proofs are order in same manner as queries in
-        // `query_to_labels_map`.
-        let proofs: Vec<_> = proof.clone().into();
-        assert_eq!(proofs.len(), query_to_labels_map.len());
-
-        let mut result = true;
-        for ((_point_label, (point, labels)), proof) in query_to_labels_map.into_iter().zip(proofs)
-        {
-            let mut comms: Vec<&'_ LabeledCommitment<_>> = Vec::new();
-            let mut values = Vec::new();
-            for label in labels.into_iter() {
-                let commitment = commitments.get(label).ok_or(Error::MissingPolynomial {
-                    label: label.to_string(),
-                })?;
-
-                let v_i =
-                    evaluations
-                        .get(&(label.clone(), *point))
-                        .ok_or(Error::MissingEvaluation {
-                            label: label.to_string(),
-                        })?;
-
-                comms.push(commitment);
-                values.push(*v_i);
-            }
-
-            let proof_time = start_timer!(|| "Checking per-query proof");
-            result &= Self::check_individual_opening_challenges(
-                vk,
-                comms,
-                *point,
-                values,
-                &proof,
-                opening_challenges,
-                Some(rng),
-            )?;
-            end_timer!(proof_time);
-        }
-        Ok(result)
-    }
-
+        Self::Commitment: 'a;
+    
     /// open_combinations but with individual challenges
     fn open_combinations_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
@@ -510,86 +474,13 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             opening_challenges,
             rng,
         )?;
+
         if !pc_result {
             eprintln!("Evaluation proofs failed to verify");
             return Ok(false);
         }
 
         Ok(true)
-    }
-
-    /// batch_open with individual challenges
-    fn batch_open_individual_opening_challenges<'a>(
-        ck: &Self::CommitterKey,
-        labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
-        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
-        query_set: &QuerySet<F>,
-        opening_challenges: &dyn Fn(u64) -> F,
-        rands: impl IntoIterator<Item = &'a Self::Randomness>,
-        rng: Option<&mut dyn RngCore>,
-    ) -> Result<Self::BatchProof, Self::Error>
-    where
-        Self::Randomness: 'a,
-        Self::Commitment: 'a,
-    {
-        let rng = &mut crate::optional_rng::OptionalRng(rng);
-        let poly_rand_comm: BTreeMap<_, _> = labeled_polynomials
-            .into_iter()
-            .zip(rands)
-            .zip(commitments.into_iter())
-            .map(|((poly, r), comm)| (poly.label(), (poly, r, comm)))
-            .collect();
-
-        let open_time = start_timer!(|| format!(
-            "Opening {} polynomials at query set of size {}",
-            poly_rand_comm.len(),
-            query_set.len(),
-        ));
-
-        let mut query_to_labels_map = BTreeMap::new();
-
-        for (label, (point_label, point)) in query_set.iter() {
-            let labels = query_to_labels_map
-                .entry(point_label)
-                .or_insert((point, BTreeSet::new()));
-            labels.1.insert(label);
-        }
-
-        let mut proofs = Vec::new();
-        for (_point_label, (point, labels)) in query_to_labels_map.into_iter() {
-            let mut query_polys: Vec<&'a LabeledPolynomial<_>> = Vec::new();
-            let mut query_rands: Vec<&'a Self::Randomness> = Vec::new();
-            let mut query_comms: Vec<&'a LabeledCommitment<Self::Commitment>> = Vec::new();
-
-            for label in labels {
-                let (polynomial, rand, comm) =
-                    poly_rand_comm.get(label).ok_or(Error::MissingPolynomial {
-                        label: label.to_string(),
-                    })?;
-
-                query_polys.push(polynomial);
-                query_rands.push(rand);
-                query_comms.push(comm);
-            }
-
-            let proof_time = start_timer!(|| "Creating proof");
-            let proof = Self::open_individual_opening_challenges(
-                ck,
-                query_polys,
-                query_comms,
-                *point,
-                opening_challenges,
-                query_rands,
-                Some(rng),
-            )?;
-
-            end_timer!(proof_time);
-
-            proofs.push(proof);
-        }
-        end_timer!(open_time);
-
-        Ok(proofs.into())
     }
 }
 
