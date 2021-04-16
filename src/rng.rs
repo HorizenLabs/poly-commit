@@ -1,5 +1,5 @@
 use crate::Vec;
-use algebra::{FromBytes, ToBytes, Field, UniformRand};
+use algebra::{FromBytes, ToBytes, to_bytes, Field, UniformRand};
 use std::marker::PhantomData;
 use digest::{generic_array::GenericArray, Digest};
 use rand_chacha::ChaChaRng;
@@ -9,6 +9,9 @@ use rand_core::{RngCore, SeedableRng};
 /// and the new seed material.
 // TODO: later: re-evaluate decision about ChaChaRng
 pub trait FiatShamirRng: RngCore {
+    /// initialize the RNG
+    fn new() -> Self;
+
     /// Create a new `Self` by initializing with a fresh seed.
     fn from_seed<'a, T: 'a + ToBytes>(seed: &'a T) -> Self;
 
@@ -55,6 +58,11 @@ impl<D: Digest> RngCore for FiatShamirChaChaRng<D> {
 }
 
 impl<D: Digest> FiatShamirRng for FiatShamirChaChaRng<D> {
+    fn new() -> Self {
+        let seed = [0u8; 32];
+        Self::from_seed(&to_bytes![seed].unwrap())
+    }
+
     /// Refresh `self.seed` with new material. Achieved by setting
     /// `self.seed = H(self.seed || new_seed)`.
     #[inline]
