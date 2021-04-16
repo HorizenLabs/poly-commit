@@ -84,6 +84,18 @@ pub enum Error {
         label: String,
     },
 
+    /// The degree bound is not "situated" in the last segment of polynomial
+    IncorrectSegmentedDegreeBound {
+        /// Degree bound.
+        degree_bound: usize,
+        /// Count of segments
+        segments_count: usize,
+        /// Length of a segment
+        segment_len: usize,
+        /// Index of the offending polynomial.
+        label: String,
+    },
+
     /// The inputs to `commit`, `open` or `verify` had incorrect lengths.
     IncorrectInputLength(String),
 
@@ -168,6 +180,18 @@ impl std::fmt::Display for Error {
                  (having degree {:?}) is greater than the maximum \
                  supported degree ({:?})",
                 degree_bound, label, poly_degree, supported_degree
+            ),
+            Error::IncorrectSegmentedDegreeBound {
+                degree_bound,
+                segments_count,
+                segment_len,
+                label,
+            } => write!(
+                f,
+                "the degree bound ({:?}) for the polynomial {} \
+                 is not in the last segment {:?} \
+                 with selgment length {:?}",
+                degree_bound, label, segments_count, segment_len
             ),
             Error::IncorrectInputLength(err) => write!(f, "{}", err),
             Error::MalformedCommitment(err) => write!(f, "{}", err),
