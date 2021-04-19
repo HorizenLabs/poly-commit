@@ -20,18 +20,15 @@ license = "MIT/Apache-2.0"
 edition = "2018"
 
 [dependencies]
-algebra = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "import_canonical_serialize_deserialize", features = ["parallel", "derive"] }
-algebra-utils = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "import_canonical_serialize_deserialize", features = [ "parallel", "fft" ] }
+algebra = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "import_canonical_serialize_deserialize", features = ["parallel", "fft", "derive"] }
 bench-utils = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "import_canonical_serialize_deserialize" }
+
 rand = { version = "0.7", default-features = false }
 rand_chacha = { version = "0.2.1", default-features = false }
 rand_core = { version = "0.5", default-features = false }
 digest = "0.8"
 rayon = { version = "1" }
 derivative = { version = "2" }
-
-# gpu feature
-#algebra-kernels = {git = "https://github.com/HorizenOfficial/ginger-algebra-ocl", branch = "ginger_ocl", optional = true }
 
 [dev-dependencies]
 algebra = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "import_canonical_serialize_deserialize", features = ["bls12_381", "jubjub", "bn_382", "bls12_377", "tweedle"] }
@@ -42,7 +39,6 @@ blake2 = { version = "0.8", default-features = false }
 [features]
 asm = [ "algebra/llvm_asm" ]
 print-trace = [ "bench-utils/print-trace" ]
-#gpu = [ "algebra-kernels", "algebra-utils/gpu" ]
 
 [profile.release]
 opt-level = 3
@@ -78,8 +74,4 @@ debug = false
 
 #[patch.'https://github.com/HorizenOfficial/ginger-lib.git']
 #algebra = { path = '../ginger-lib/algebra' }
-#algebra-utils = { path = '../ginger-lib/algebra-utils' }
 #bench-utils = { path = '../ginger-lib/bench-utils' }
-
-#[patch.'https://github.com/HorizenOfficial/ginger-algebra-ocl']
-#algebra-kernels = { path = '../ginger-algebra-ocl/algebra-kernels' }

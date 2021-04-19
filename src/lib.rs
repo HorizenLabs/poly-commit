@@ -15,7 +15,7 @@ extern crate derivative;
 extern crate bench_utils;
 
 use algebra::{Field, serialize::*, SemanticallyValid};
-pub use algebra_utils::fft::DensePolynomial as Polynomial;
+pub use algebra::fft::DensePolynomial as Polynomial;
 use rand_core::RngCore;
 
 /// Implements a Fiat-Shamir based Rng that allows one to incrementally update

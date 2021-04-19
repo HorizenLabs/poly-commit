@@ -1,6 +1,6 @@
 use crate::{Rc, String, Vec};
 use algebra::{Field, serialize::{CanonicalSerialize, CanonicalDeserialize, SerializationError}, SemanticallyValid};
-pub use algebra_utils::DensePolynomial as Polynomial;
+pub use algebra::DensePolynomial as Polynomial;
 use std::{
     io::{Read, Write, Error as IoError, ErrorKind, Result as IoResult},
     ops::{AddAssign, MulAssign, SubAssign},
