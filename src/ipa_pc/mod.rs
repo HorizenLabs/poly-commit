@@ -20,9 +20,10 @@ use algebra_kernels::polycommit::{get_kernels, get_gpu_min_length};
 use digest::Digest;
 use crate::rng::{FiatShamirRng, FiatShamirChaChaRng};
 
-/// A polynomial commitment scheme based on the hardness of the
-/// discrete logarithm problem in prime-order groups.
-/// The construction is described in detail in [[BCMS20]][pcdas].
+/// The dlog commitment scheme from Bootle et al. based on the hardness of the discrete 
+/// logarithm problem in prime-order groups.
+/// This implementation is according to the variant given in [[BCMS20]][pcdas], extended 
+/// to support polynomials of arbitrary degree via segmentation.
 ///
 /// Degree bound enforcement requires that (at least one of) the points at
 /// which a committed polynomial is evaluated are from a distribution that is
@@ -41,8 +42,7 @@ pub struct InnerProductArgPC<G: AffineCurve, D: Digest> {
 impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     /// `PROTOCOL_NAME` is used as a seed for the setup function.
     const PROTOCOL_NAME: &'static [u8] = b"PC-DL-2020";
-    /// Create a Pedersen commitment to `scalars` using the commitment key `comm_key`.
-    /// Optionally, randomize the commitment using `hiding_generator` and `randomizer`.
+    /// The low-level single segment single poly commit function.
     fn cm_commit(
         comm_key: &[G],
         scalars: &[G::ScalarField],
@@ -65,8 +65,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         l.par_iter().zip(r).map(|(li, ri)| *li * ri).sum()
     }
 
-    /// The succinct portion of `PC::check`. This algorithm runs in time
-    /// O(log d), where d is the degree of the committed polynomials.
+    /// The succinct portion of verifying a single-point opening proof. 
+    /// If successful, returns the (recomputed) reduction challenges
     fn succinct_check<'a>(
         vk: &VerifierKey<G>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Commitment<G>>>,
@@ -197,7 +197,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         Some(check_poly)
     }
 
-    /// Perform the succinct check of proof, returning the succinct check polynomial (the xi_s)
+    /// Succinct check of a multi-point multi-poly opening proof from [[BDFG2020]](https://eprint.iacr.org/2020/081) 
+    /// If successful, returns the (recomputed) succinct check polynomial (the xi_s) 
     /// and the GFinal.
     fn succinct_batch_check_individual_opening_challenges<'a, R: RngCore>(
         vk: &VerifierKey<G>,
@@ -318,6 +319,10 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         Ok((check_poly.unwrap(), proof.final_comm_key))
     }
 
+    /// Checks whether degree bounds are `situated' in the last segment of a polynomial
+    /// 
+    /// TODO: rename to check_bounds, or alternatively write a function that receives the
+    /// supposed degree, and which checks in addition whether the segment count is plausible.
     fn check_degrees_and_bounds(
         supported_degree: usize,
         p: &LabeledPolynomial<G::ScalarField>,
@@ -349,6 +354,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         Ok(())
     }
 
+    /// Checks if the degree bound is situated in the last segment.
     fn check_segments_and_bounds(
         bound: usize,
         segments_count: usize,
@@ -370,6 +376,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         Ok(())
     }
 
+    /// Computes the 'shifted' polynomial as needed for degree bound proofs.
     fn shift_polynomial(
         ck: &CommitterKey<G>,
         p: &Polynomial<G::ScalarField>,
@@ -385,6 +392,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         }
     }
 
+    /// Computing the base point vector of the commmitment scheme in a 
+    /// deterministic manner, given the PROTOCOL_NAME.
     fn sample_generators(num_generators: usize) -> Vec<G> {
         let generators: Vec<_> = (0..num_generators).into_par_iter()
             .map(|i| {
@@ -405,7 +414,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         G::Projective::batch_normalization_into_affine(generators)
     }
 
-    /// Perform bullet reduce at the commitment last stage
+    /// Perform a dlog reduction step as described in BCMS20
     fn polycommit_round_reduce(
         round_challenge: G::ScalarField,
         round_challenge_inv: G::ScalarField,
@@ -455,6 +464,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     }
 }
 
+/// Implementation of the PolynomialCommitment trait for the segmentized dlog commitment scheme 
 impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerProductArgPC<G, D> {
     type UniversalParams = UniversalParams<G>;
     type CommitterKey = CommitterKey<G>;
@@ -468,6 +478,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
     type Error = Error;
     type RandomOracle = FiatShamirChaChaRng<D>;
 
+    /// Setup of the base point vector (deterministically derived from the 
+    /// PROTOCOL_NAME as seed).
     fn setup<R: RngCore>(
         max_degree: usize,
         _rng: &mut R,
@@ -491,9 +503,11 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         Ok(pp)
     }
 
+    /// Trims the base point vector of the setup function to a custom segment size
     fn trim(
         pp: &Self::UniversalParams,
-        supported_degree: usize,
+        // the segment size (TODO: let's rename it!)
+        supported_degree: usize, 
         _supported_hiding_bound: usize,
         _enforced_degree_bounds: Option<&[usize]>,
     ) -> Result<(Self::CommitterKey, Self::VerifierKey), Self::Error> {
@@ -525,7 +539,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         Ok((ck, vk))
     }
 
-    /// Outputs a commitment to `polynomial`.
+    /// Domain extended commit function, outputs a `segmented commitment' 
+    /// to a polynomial, regardless of its degree.
     fn commit<'a>(
         ck: &Self::CommitterKey,
         polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
@@ -613,6 +628,10 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         Ok((comms, rands))
     }
 
+    /// Single point multi poly open, allowing the random oracle to be passed from 
+    /// 'outside' to the function. 
+    /// CAUTION: This is a low-level function which assumes that the statment (i.e.
+    /// the commitments and the query point) is already absorbed by the random oracle.
     fn open_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
@@ -890,7 +909,10 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         })
     }
 
-    /// The multi-point "batching" according to Boneh, et al. 2020, "Efficient polynomial commitment schemes for multiple points and polynomials", https://eprint.iacr.org/2020/081.
+    /// The multi point multi poly opening proof from [[BDFG2020]](https://eprint.iacr.org/2020/081) 
+    /// CAUTION: This is a low-level function which assumes that the statment (i.e.
+    /// the commitments and the query point) is already absorbed by the random oracle
+    /// passed from the 'outside'.
     fn batch_open_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
@@ -1107,6 +1129,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         Ok(true)
     }
 
+    /// verifies a multi-point multi-poly opening proof a la [[BDFG2020]](https://eprint.iacr.org/2020/081).
     fn batch_check_individual_opening_challenges<'a, R: RngCore>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
