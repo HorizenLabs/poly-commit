@@ -95,7 +95,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         }
 
         // Compute combined check_poly and combined g_fin
-        let (mut combined_check_poly, combined_g_fin, combined_v) = batching_chal_pows
+        let (mut combined_check_poly, combined_g_fin, combined_v) = batching_chals
             .into_par_iter()
             .zip(xi_s_vec)
             .zip(values)
