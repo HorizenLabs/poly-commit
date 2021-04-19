@@ -9,23 +9,30 @@ use rand_core::{RngCore, SeedableRng};
 /// and the new seed material.
 // TODO: later: re-evaluate decision about ChaChaRng
 pub trait FiatShamirRng: RngCore {
+    /// Internal representation of the seed, useful to get and set
+    type Seed: Clone;
+
     /// initialize the RNG
     fn new() -> Self;
 
-    /// Create a new `Self` by initializing with a fresh seed.
+    /// Create a new `Self` by initializing its internal state with a fresh `seed`,
+    /// generically being something serializable to a byte array.
     fn from_seed<'a, T: 'a + ToBytes>(seed: &'a T) -> Self;
 
-    /// Get `self.seed`.
-    fn get_seed(&self) -> &[u8];
-
-    /// Refresh `self.seed` with new material. Achieved by setting
-    /// `self.seed = H(self.seed || new_seed)`.
+    /// Refresh the internal state with new material `seed`, generically being
+    /// something serializable to a byte array.
     fn absorb<'a, T: 'a + ToBytes>(&mut self, seed: &'a T);
 
     /// Squeeze a new random field element
     fn squeeze_128_bits_challenge<F: Field>(&mut self) -> F {
         u128::rand(self).into()
     }
+
+    /// Get the internal state in the form of an instance of `Self::Seed`.
+    fn get_seed(&self) -> &Self::Seed;
+
+    /// Set interal state according to the specified `new_seed`
+    fn set_seed(&mut self, new_seed: Self::Seed);
 }
 
 /// A `SeedableRng` that refreshes its seed by hashing together the previous seed
@@ -61,6 +68,9 @@ impl<D: Digest> RngCore for FiatShamirChaChaRng<D> {
 }
 
 impl<D: Digest> FiatShamirRng for FiatShamirChaChaRng<D> {
+
+    type Seed = GenericArray<u8, D::OutputSize>;
+
     fn new() -> Self {
         let seed = [0u8; 32];
         Self::from_seed(&to_bytes![seed].unwrap())
@@ -96,7 +106,13 @@ impl<D: Digest> FiatShamirRng for FiatShamirChaChaRng<D> {
 
     /// Get `self.seed`.
     #[inline]
-    fn get_seed(&self) -> &[u8] {
+    fn get_seed(&self) -> &Self::Seed {
         &self.seed
+    }
+
+    /// Set `self.seed` to the specified value
+    #[inline]
+    fn set_seed(&mut self, new_seed: Self::Seed) {
+        self.seed = new_seed
     }
 }

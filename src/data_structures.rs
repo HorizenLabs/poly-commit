@@ -1,6 +1,6 @@
 use crate::{Rc, String, Vec};
 use algebra::Field;
-pub use algebra_utils::DensePolynomial as Polynomial;
+pub use algebra::DensePolynomial as Polynomial;
 use std::borrow::Borrow;
 use std::ops::{AddAssign, MulAssign, SubAssign};
 use rand_core::RngCore;

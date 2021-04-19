@@ -15,7 +15,7 @@ extern crate derivative;
 extern crate bench_utils;
 
 use algebra::Field;
-pub use algebra_utils::fft::DensePolynomial as Polynomial;
+pub use algebra::fft::DensePolynomial as Polynomial;
 use std::iter::FromIterator;
 use rand_core::RngCore;
 

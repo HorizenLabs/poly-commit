@@ -2,7 +2,7 @@ use crate::{BTreeMap, String, ToString, Vec};
 use crate::{Error, Evaluations, QuerySet};
 use crate::{LabeledCommitment, LabeledPolynomial, LabeledRandomness};
 use crate::{PCRandomness, PCUniversalParams, Polynomial, PolynomialCommitment};
-use algebra_utils::msm::VariableBaseMSM;
+use algebra::msm::VariableBaseMSM;
 use algebra::{ToBytes, to_bytes, Field, PrimeField, UniformRand, Group, AffineCurve, ProjectiveCurve};
 use std::{format, vec};
 use std::marker::PhantomData;
@@ -12,9 +12,6 @@ mod data_structures;
 pub use data_structures::*;
 
 use rayon::prelude::*;
-
-#[cfg(feature = "gpu")]
-use algebra_kernels::polycommit::{get_kernels, get_gpu_min_length};
 
 use digest::Digest;
 use crate::rng::{FiatShamirRng, FiatShamirChaChaRng};
@@ -92,15 +89,9 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         // Absorb evaluations
         fs_rng.absorb(&values.iter().flat_map(|val| to_bytes!(val).unwrap()).collect::<Vec<_>>());
 
-        // Sample new batching challenge
-        let random_scalar = fs_rng.squeeze_128_bits_challenge();
-
-        // Collect the powers of the batching challenge in a vector
-        let mut batching_chal = G::ScalarField::one();
-        let mut batching_chal_pows = vec![G::ScalarField::zero(); xi_s_vec.len()];
-        for i in 0..batching_chal_pows.len() {
-            batching_chal_pows[i] = batching_chal;
-            batching_chal *= &random_scalar;
+        let mut batching_chals = vec![G::ScalarField::zero(); xi_s_vec.len()];
+        for i in 0..batching_chals.len() {
+            batching_chals[i] = fs_rng.squeeze_128_bits_challenge();
         }
 
         // Compute combined check_poly and combined g_fin
@@ -468,8 +459,10 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         query_sets:         impl IntoIterator<Item = &'a QuerySet<'a, G::ScalarField>>,
         values:             impl IntoIterator<Item = &'a Evaluations<'a, G::ScalarField>>,
         proofs:             impl IntoIterator<Item = &'a BatchProof<G>>,
-        states:             impl IntoIterator<Item = &'a Vec<u8>>,
+        states:             impl IntoIterator<Item = &'a <FiatShamirChaChaRng<D> as FiatShamirRng>::Seed>,
     ) -> Result<(Vec<SuccinctCheckPolynomial<G::ScalarField>>, Vec<G>), Error>
+        where
+            D::OutputSize: 'a
     {
         let comms = commitments.into_iter().collect::<Vec<_>>();
         let query_sets = query_sets.into_iter().collect::<Vec<_>>();
@@ -488,6 +481,9 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             .zip(states)
             .map(|((((commitments, query_set), values), proof), state)|
                 {
+                    let mut fs_rng = FiatShamirChaChaRng::<D>::new();
+                    fs_rng.set_seed(state.clone());
+
                     // Perform succinct check of i-th proof
                     let (challenges, final_comm_key) = Self::succinct_batch_check_individual_opening_challenges(
                         vk,
@@ -495,7 +491,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
                         query_set,
                         values,
                         proof,
-                        &mut FiatShamirChaChaRng::<D>::from_seed(state),
+                        &mut fs_rng,
                     ).unwrap();
 
                     (final_comm_key, challenges)
@@ -608,31 +604,6 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         k_l: &mut [G::Projective],
         k_r: &[G],
     ) {
-        #[cfg(feature = "gpu")]
-        if get_gpu_min_length() <= k_l.len() {
-            match get_kernels() {
-                Ok(kernels) => {
-                    match kernels[0].polycommit_round_reduce(
-                        round_challenge,
-                        round_challenge_inv,
-                        c_l,
-                        c_r,
-                        z_l,
-                        z_r,
-                        k_l,
-                        k_r
-                    ) {
-                        Ok(_) => {},
-                        Err(error) => { panic!("{}", error); }
-                    }
-                },
-                Err(error) => {
-                    panic!("{}", error);
-                }
-            }
-            return;
-        }
-
         c_l.par_iter_mut()
             .zip(c_r)
             .for_each(|(c_l, c_r)| *c_l += &(round_challenge_inv * c_r));
