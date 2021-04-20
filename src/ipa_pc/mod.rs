@@ -443,6 +443,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
         if check_poly.is_none() {
             end_timer!(check_time);
+            end_timer!(batch_check_time);
             return Err(Error::FailedSuccinctCheck);
         }
 
@@ -716,7 +717,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             let hiding_bound = labeled_polynomial.hiding_bound();
             let degree_bound = labeled_polynomial.degree_bound();
 
-            let commit_time = start_timer!(|| format!(
+            let single_commit_time = start_timer!(|| format!(
                 "Polynomial {} of degree {}, degree bound {:?}, and hiding bound {:?}",
                 label,
                 polynomial.degree(),
@@ -772,7 +773,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             comms.push(labeled_comm);
             rands.push(labeled_rand);
 
-            end_timer!(commit_time);
+            end_timer!(single_commit_time);
         }
 
         end_timer!(commit_time);
@@ -1195,8 +1196,6 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let mut rands = rands;
         let labeled_batch_rand = LabeledRandomness::new(format!("Batch"), batch_randomness);
         rands.push(&labeled_batch_rand);
-
-        end_timer!(batch_time);
 
         fs_rng.absorb(&to_bytes![batch_values.values().collect::<Vec<&G::ScalarField>>(), batch_commitment, point].unwrap());
 
