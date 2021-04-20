@@ -87,7 +87,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let mut combined_commitment_proj = <G::Projective as ProjectiveCurve>::zero();
         let mut combined_v = G::ScalarField::zero();
 
-        let mut cur_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
+        let lambda: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
+        let mut cur_challenge = lambda;
 
         let labeled_commitments = commitments.into_iter();
         let values = values.into_iter();
@@ -106,7 +107,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             }
             combined_commitment_proj += &comm_lc.mul(&cur_challenge);
 
-            cur_challenge = fs_rng.squeeze_128_bits_challenge();
+            cur_challenge = cur_challenge * &lambda;
 
             let degree_bound = labeled_commitment.degree_bound();
 
@@ -136,7 +137,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
                 combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
                 combined_commitment_proj += &commitment.comm[segments_count - 1].mul(cur_challenge * &shift);
 
-                cur_challenge = fs_rng.squeeze_128_bits_challenge();
+                cur_challenge = cur_challenge * &lambda;
             }
         }
 
@@ -664,7 +665,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let combine_time = start_timer!(|| "Combining polynomials, randomness, and commitments.");
 
         // TODO: we need to compute the values and absorb them before squeezing the challenge
-        let mut cur_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
+        let lambda: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
+        let mut cur_challenge = lambda;
 
         for (labeled_polynomial, (labeled_commitment, labeled_randomness)) in
         polys_iter.zip(comms_iter.zip(rands_iter))
@@ -729,7 +731,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 combined_rand += &(cur_challenge * &rand_lc);
             }
 
-            cur_challenge = fs_rng.squeeze_128_bits_challenge();
+            cur_challenge = cur_challenge * &lambda;
 
             if let Some(degree_bound_len) = degree_bound_len {
 
@@ -761,7 +763,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                     combined_rand += &(cur_challenge * &shift * &randomness.rand[segments_count - 1]);
                 }
 
-                cur_challenge = fs_rng.squeeze_128_bits_challenge();
+                cur_challenge = cur_challenge * &lambda;
             }
         }
 
