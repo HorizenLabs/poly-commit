@@ -200,6 +200,9 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     /// Succinct check of a multi-point multi-poly opening proof from [[BDFG2020]](https://eprint.iacr.org/2020/081) 
     /// If successful, returns the (recomputed) succinct check polynomial (the xi_s) 
     /// and the GFinal.
+    /// CAUTION: As batch_check_individual_opening_challenges, this is a low-level 
+    /// function which assumes that commitments and query_set are already bound to the internal 
+    /// state of the Fiat-Shamir rng.
     fn succinct_batch_check_individual_opening_challenges<'a, R: RngCore>(
         vk: &VerifierKey<G>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Commitment<G>>>,
@@ -630,8 +633,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
     /// Single point multi poly open, allowing the random oracle to be passed from 
     /// 'outside' to the function. 
-    /// CAUTION: This is a low-level function which assumes that the statment (i.e.
-    /// the commitments and the query point) is already absorbed by the random oracle.
+    /// CAUTION: This is a low-level function which assumes that the commitments and 
+    /// the query point is already bound to the internal state of the Fiat-Shamir 
+    /// rng.
     fn open_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
@@ -659,6 +663,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let combine_time = start_timer!(|| "Combining polynomials, randomness, and commitments.");
 
+        // TODO: we need to compute the values and absorb them before squeezing the challenge
         let mut cur_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
         for (labeled_polynomial, (labeled_commitment, labeled_randomness)) in
@@ -910,9 +915,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
     }
 
     /// The multi point multi poly opening proof from [[BDFG2020]](https://eprint.iacr.org/2020/081) 
-    /// CAUTION: This is a low-level function which assumes that the statment (i.e.
-    /// the commitments and the query point) is already absorbed by the random oracle
-    /// passed from the 'outside'.
+    /// CAUTION: This is a low-level function which assumes that the commitments and 
+    /// the query point are already bound to the internal state of the Fiat-Shamir 
+    /// rng.
     fn batch_open_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
@@ -932,7 +937,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let batch_time = start_timer!(|| "Multi poly multi point batching.");
 
-        // lambda
+        // TODO: we need to bind the evaluation claims to the Fiat-Shamir state. This 
+        // is done by absorbing the values in a unique order (the query point do not need to be
+        // absorbed).
         let lambda: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
         let mut cur_challenge = lambda;
 
@@ -1071,6 +1078,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         })
     }
 
+    /// CAUTION: This is a low-level function to be handled carefully, typically 
+    /// presuming that the commitments and the query point is already bound to 
+    /// the internal state of the Fiat-Shamir rng.
     fn check_individual_opening_challenges<'a>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
@@ -1130,6 +1140,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
     }
 
     /// verifies a multi-point multi-poly opening proof a la [[BDFG2020]](https://eprint.iacr.org/2020/081).
+    /// CAUTION: This is a low-level function which assumes that commitments 
+    /// and query_set are already bound to the internal state of the Fiat-Shamir rng.
     fn batch_check_individual_opening_challenges<'a, R: RngCore>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,

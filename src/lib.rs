@@ -182,6 +182,9 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             Self::Randomness: 'a,
             Self::Commitment: 'a,
     {
+        // TODO: we need to setup our own Fiat-Shamir rng, and initialize it (or absorb)
+        // using the 1) commitments  2) query point, before passing the rng to the low-
+        // level open_individual_... function.
         Self::open_individual_opening_challenges(
             ck,
             labeled_polynomials,
@@ -211,6 +214,9 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             Self::Randomness: 'a,
             Self::Commitment: 'a,
     {
+        // TODO: we need to setup our own Fiat-Shamir rng, and initialize it (or absorb)
+        // using the 1) commitments  2) query set, before passing the rng to the low-
+        // level open_individual_... function.
         Self::batch_open_individual_opening_challenges(
             ck,
             labeled_polynomials,
@@ -238,6 +244,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         where
             Self::Commitment: 'a,
     {
+        // as in open(), setup Fiat-Shamir rng, etc.
         Self::check_individual_opening_challenges(
             vk,
             commitments,
@@ -266,6 +273,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         where
             Self::Commitment: 'a,
     {
+        // TODO: as in batch_open(), setup Fiat-Shamir rng, etc.
         Self::batch_check_individual_opening_challenges(
             vk,
             commitments,
@@ -296,6 +304,13 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             Self::Randomness: 'a,
             Self::Commitment: 'a,
     {
+        // TODO: we need to setup our own Fiat-Shamir rng, and initialize it (or absorb)
+        // using the 
+        // 1) the commitments and the formal LC's 
+        // 2) query set, 
+        // before passing the rng to the low-level open_individual_... function. 
+        // An alternative approach would be not to absorb the linearly combined commitments
+        // inside fn open_combinations_individual_opening_challenges().  
         Self::open_combinations_individual_opening_challenges(
             ck,
             linear_combinations,
@@ -325,6 +340,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         where
             Self::Commitment: 'a,
     {
+        // TODO: as for open_combinations, setup of Fiat-Shamir, etc.
         Self::check_combinations_individual_opening_challenges(
             vk,
             linear_combinations,
@@ -338,9 +354,10 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     }
 
     /// Single point multi poly open, allowing the random oracle to be passed from 
-    /// 'outside' to the function. This is a low-level function to be handled
-    /// with caution, typically presuming that the statement is already absorbed by 
-    /// the random oracle.
+    /// 'outside' to the function. 
+    /// CAUTION: This is a low-level function to be handled carefully, typically 
+    /// presuming that commitments and query_set is already bound to the internal 
+    /// state of the Fiat-Shamir rng.
     /// TODO: rename this function
     fn open_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
@@ -356,9 +373,10 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             Self::Commitment: 'a;
 
     /// Multi point multi poly open, allowing the random oracle to be passed from 
-    /// 'outside' to the function. This is a low-level function to be handled
-    /// with caution, typically presuming that the statement is already absorbed by 
-    /// the random oracle.
+    /// 'outside' to the function.
+    /// CAUTION: This is a low-level function to be handled carefully, typically 
+    /// presuming that commitments and query_set is already bound to the internal 
+    /// state of the Fiat-Shamir rng.
     /// TODO: rename this function
     fn batch_open_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
@@ -374,8 +392,9 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             Self::Commitment: 'a;
 
     /// Single point multi poly verify, with random oracle passed from 'outside'.
-    /// This is a low-level function to be handled with caution, typically 
-    /// presuming that the statement is already absorbed by the random oracle.
+    /// CAUTION: This is a low-level function to be handled carefully, typically 
+    /// presuming that commitments and query_set is already bound to the internal 
+    /// state of the Fiat-Shamir rng.
     /// TODO: rename this function
     fn check_individual_opening_challenges<'a>(
         vk: &Self::VerifierKey,
@@ -390,9 +409,10 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             Self::Commitment: 'a;
 
     /// Multi point multi poly verify, with random oracle passed from 'outside'.
-    /// This is a low-level function to be handled with caution, typically presuming 
-    /// that the statement is already absorbed by the random oracle.
-    /// TODO: rename this function
+    /// CAUTION: This is a low-level function to be handled carefully, typically 
+    /// presuming that commitments and query_set is already bound to the internal 
+    /// state of the Fiat-Shamir rng.
+    // TODO: rename this function
     fn batch_check_individual_opening_challenges<'a, R: RngCore>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
@@ -407,9 +427,12 @@ pub trait PolynomialCommitment<F: Field>: Sized {
 
     /// Default implementation of Multi point multi LC open, with random oracle passed from 'outside'.
     /// Evaluates each of the (non-trivial) LC-polynomials at each of the query point the LC is queried.
-    /// This is a low-level function to be handled with caution, presuming that the statement is already 
-    /// absorbed by the random oracle.
-    /// TODO: rename this function
+    /// CAUTION: This is a low-level function to be handled with carefully, presuming that 
+    /// 1) the commitments
+    /// 2) their LC's, and
+    /// 3) the query set
+    /// is already bound to the internal state of the Fiat-Shamir rng.
+    // TODO: rename this function
     fn open_combinations_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
         linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
@@ -446,6 +469,9 @@ pub trait PolynomialCommitment<F: Field>: Sized {
 
     /// Default implementation of Multi point multi LC verify, with random oracle passed from 'outside'.
     /// Evaluates each of the (non-trivial) LC-polynomials at the query point.
+    /// CAUTION: This is a low-level function to be handled carefully, typically 
+    /// presuming that commitments and query_set is already bound to the internal 
+    /// state of the Fiat-Shamir rng.
     /// TODO: rename this function
     fn check_combinations_individual_opening_challenges<'a, R: RngCore>(
         vk: &Self::VerifierKey,
