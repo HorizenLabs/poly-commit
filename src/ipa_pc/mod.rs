@@ -169,7 +169,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
         for (l, r) in l_iter.zip(r_iter) {
 
-            fs_rng.absorb(&to_bytes![round_challenge, l, r].unwrap());
+            fs_rng.absorb(&to_bytes![l, r].unwrap());
             round_challenge = fs_rng.squeeze_128_bits_challenge();
 
             round_challenges.push(round_challenge);
@@ -822,7 +822,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         combined_commitment = combined_commitment_proj.into_affine();
 
-        // ith challenge
+        // 0-th challenge
         fs_rng.absorb(&to_bytes![combined_commitment, point, combined_v].unwrap());
         let mut round_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
@@ -876,7 +876,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             l_vec.push(lr[0]);
             r_vec.push(lr[1]);
 
-            fs_rng.absorb(&to_bytes![round_challenge, lr[0], lr[1]].unwrap());
+            fs_rng.absorb(&to_bytes![lr[0], lr[1]].unwrap());
 
             round_challenge = fs_rng.squeeze_128_bits_challenge();
             let round_challenge_inv = round_challenge.inverse().unwrap();
