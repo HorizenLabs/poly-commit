@@ -184,9 +184,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             Self::Randomness: 'a,
             Self::Commitment: 'a,
     {
-        // TODO: we need to setup our own Fiat-Shamir rng, and initialize it (or absorb)
-        // using the 1) commitments  2) query point, before passing the rng to the low-
-        // level open_individual_... function.
         Self::open_individual_opening_challenges(
             ck,
             labeled_polynomials,
@@ -218,9 +215,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             Self::Randomness: 'a,
             Self::Commitment: 'a,
     {
-        // TODO: we need to setup our own Fiat-Shamir rng, and initialize it (or absorb)
-        // using the 1) commitments  2) query set, before passing the rng to the low-
-        // level open_individual_... function.
         Self::batch_open_individual_opening_challenges(
             ck,
             labeled_polynomials,
@@ -275,7 +269,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         where
             Self::Commitment: 'a,
     {
-        // TODO: as in batch_open(), setup Fiat-Shamir rng, etc.
         Self::batch_check_individual_opening_challenges(
             vk,
             commitments,
@@ -308,13 +301,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             Self::Randomness: 'a,
             Self::Commitment: 'a,
     {
-        // TODO: we need to setup our own Fiat-Shamir rng, and initialize it (or absorb)
-        // using the
-        // 1) the commitments and the formal LC's
-        // 2) query set,
-        // before passing the rng to the low-level open_individual_... function.
-        // An alternative approach would be not to absorb the linearly combined commitments
-        // inside fn open_combinations_individual_opening_challenges().
         Self::open_combinations_individual_opening_challenges(
             ck,
             linear_combinations,
@@ -343,7 +329,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         where
             Self::Commitment: 'a,
     {
-        // TODO: as for open_combinations, setup of Fiat-Shamir, etc.
         Self::check_combinations_individual_opening_challenges(
             vk,
             linear_combinations,

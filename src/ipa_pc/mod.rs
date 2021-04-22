@@ -664,7 +664,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let combine_time = start_timer!(|| "Combining polynomials, randomness, and commitments.");
 
-        // TODO: we need to compute the values and absorb them before squeezing the challenge
+        // as the statement of the opening proof is already bound to the interal state of the fr_rng,
+        // we simply squeeze the challenge scalar for the random linear combination
         let lambda: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
         let mut cur_challenge = lambda;
 
