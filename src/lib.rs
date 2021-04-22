@@ -168,7 +168,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// Single point multi poly open:
     /// On input a list of labeled polynomials and a query point, `open` outputs a proof of evaluation
     /// of the polynomials at the query point.
-    /// TODO: as a high-level function, we will remove the fs_rng.
     fn open<'a>(
         ck: &Self::CommitterKey,
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
@@ -200,7 +199,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// On input a list of labeled polynomials and a query set, `open` outputs a proof of evaluation
     /// of the polynomials at the points in the query set.
     /// TODO: rename this function
-    /// TODO: as a high-level function, we will remove the fs_rng.
     fn batch_open<'a>(
         ck: &Self::CommitterKey,
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
@@ -231,7 +229,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// Single point multi poly verify:
     /// Verifies that `values` are the evaluations at `point` of the polynomials
     /// committed inside `commitments`.
-    /// TODO: as a high-level function, we will remove the fs_rng.
     fn check<'a>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
@@ -260,7 +257,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// Checks that `values` are the true evaluations at `query_set` of the polynomials
     /// committed in `labeled_commitments`.
     /// TODO: rename this function
-    /// TODO: as a high-level function, we will remove the fs_rng.
     fn batch_check<'a, R: RngCore>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
@@ -289,7 +285,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// On input a list of polynomials, linear combinations of those polynomials,
     /// and a query set, `open_combination` outputs a proof of evaluation of
     /// the combinations at the points in the query set.
-    /// TODO: as a high-level function, we will remove the fs_rng.
     fn open_combinations<'a>(
         ck: &Self::CommitterKey,
         linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
@@ -326,7 +321,6 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// Multi point multi LC verify.
     /// Checks that `evaluations` are the true evaluations at `query_set` of the
     /// linear combinations of polynomials committed in `commitments`.
-    /// TODO: as a high-level function, we will remove the fs_rng.
     fn check_combinations<'a, R: RngCore>(
         vk: &Self::VerifierKey,
         linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
@@ -430,8 +424,8 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// CAUTION: This is a low-level function to be handled with carefully, presuming that
     /// 1) the commitments
     /// 2) their LC's, and
-    /// 3) the query set
-    /// is already bound to the internal state of the Fiat-Shamir rng.
+    /// 3) the query set as well as the evaluations
+    /// are already bound to the internal state of the Fiat-Shamir rng.
     // TODO: rename this function
     fn open_combinations_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
