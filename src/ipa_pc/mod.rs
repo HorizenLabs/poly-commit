@@ -73,7 +73,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         point: G::ScalarField,
         values: impl IntoIterator<Item = G::ScalarField>,
         proof: &Proof<G>,
-        /// This implementation assumes that the commitments (as well as the point) are already absorbed by the Fiat Shamir rng
+        // This implementation assumes that the commitments (as well as the point) are already absorbed by the Fiat Shamir rng
         fs_rng: &mut FiatShamirChaChaRng<D>,
     ) -> Option<SuccinctCheckPolynomial<G::ScalarField>> {
         let check_time = start_timer!(|| "Succinct checking");
@@ -212,7 +212,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         values: &Evaluations<G::ScalarField>,
         batch_proof: &BatchProof<G>,
         _rng: &mut R,
-        /// This implementation assumes that the commitments (as well as the query set) are already absorbed by the Fiat Shamir rng
+        // This implementation assumes that the commitments (as well as the query set) are already absorbed by the Fiat Shamir rng
         fs_rng: &mut FiatShamirChaChaRng<D>,
     ) -> Result<(SuccinctCheckPolynomial<G::ScalarField>, G), Error>
     {
@@ -646,7 +646,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         point: G::ScalarField,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
-        /// This implementation assumes that the commitments (as well as the point) are already absorbed by the Fiat Shamir rng
+        // This implementation assumes that the commitments (as well as the point) are already absorbed by the Fiat Shamir rng
         fs_rng: &mut Self::RandomOracle,
     ) -> Result<Self::Proof, Self::Error>
         where
@@ -930,7 +930,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         query_set: &QuerySet<G::ScalarField>,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
-        /// This implementation assumes that the commitments (as well as the query set) are already absorbed by the Fiat Shamir rng
+        // This implementation assumes that the commitments (as well as the query set) are already absorbed by the Fiat Shamir rng
         fs_rng: &mut Self::RandomOracle,
     ) -> Result<Self::BatchProof, Self::Error>
         where
@@ -1094,7 +1094,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         values: impl IntoIterator<Item = G::ScalarField>,
         proof: &Self::Proof,
         _rng: Option<&mut dyn RngCore>,
-        /// This implementation assumes that the commitments (as well as the point) are already absorbed by the Fiat Shamir rng
+        // This implementation assumes that the commitments (as well as the point) are already absorbed by the Fiat Shamir rng
         fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
@@ -1156,7 +1156,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         evaluations: &Evaluations<G::ScalarField>,
         batch_proof: &Self::BatchProof,
         rng: &mut R,
-        /// This implementation assumes that the commitments (as well as the query set) are already absorbed by the Fiat Shamir rng
+        // This implementation assumes that the commitments (as well as the query set) are already absorbed by the Fiat Shamir rng
         fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
