@@ -168,6 +168,9 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// Single point multi poly open:
     /// On input a list of labeled polynomials and a query point, `open` outputs a proof of evaluation
     /// of the polynomials at the query point.
+    /// For now it is just a wrapper for the low-level function `open_individual_opening_challenges()`
+    /// and hence assumes that the statement of the opening proof (i.e. the commitments, the query point,
+    /// and the evaluations) are bound to the state of the Fiat-Shamir rng. 
     fn open<'a>(
         ck: &Self::CommitterKey,
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
@@ -198,6 +201,9 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// Multi point multi poly open:
     /// On input a list of labeled polynomials and a query set, `open` outputs a proof of evaluation
     /// of the polynomials at the points in the query set.
+    /// For now it is just a wrapper for the low-level function `open_individual_opening_challenges()`
+    /// and hence assumes that the statement of the opening proof (i.e. the commitments, the query set,
+    /// and the evaluations) are bound to the state of the Fiat-Shamir rng. 
     /// TODO: rename this function
     fn batch_open<'a>(
         ck: &Self::CommitterKey,
@@ -285,6 +291,9 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// On input a list of polynomials, linear combinations of those polynomials,
     /// and a query set, `open_combination` outputs a proof of evaluation of
     /// the combinations at the points in the query set.
+    /// For now it is just a wrapper for the low-level function `open_combinations_individual_opening_challenges()`
+    /// and hence assumes that the statement of the opening proof (i.e. the LCs, the query set,
+    /// and the evaluations) are bound to the state of the Fiat-Shamir rng. 
     fn open_combinations<'a>(
         ck: &Self::CommitterKey,
         linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
