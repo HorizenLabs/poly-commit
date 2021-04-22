@@ -89,7 +89,6 @@ impl<D: Digest> FiatShamirRng for FiatShamirChaChaRng<D> {
     }
 
     /// Create a new `Self` by initializing with a fresh seed.
-    /// `self.seed = H(self.seed || new_seed)`.
     #[inline]
     fn from_seed<'a, T: 'a + ToBytes>(seed: &'a T) -> Self {
         let mut bytes = Vec::new();
