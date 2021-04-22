@@ -99,8 +99,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let mut batching_chal = G::ScalarField::one();
         let mut batching_chals = vec![G::ScalarField::zero(); xi_s_vec.len()];
         for i in 0..batching_chals.len() {
-            batching_chal *= &random_scalar;
             batching_chals[i] = batching_chal;
+            batching_chal *= &random_scalar;
         }
 
         // Compute combined check_poly and combined g_fin
@@ -251,7 +251,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let mut combined_v = G::ScalarField::zero();
 
         let lambda: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
-        let mut cur_challenge = lambda;
+        let mut cur_challenge = G::ScalarField::one();
 
         let labeled_commitments = commitments.into_iter();
         let values = values.into_iter();
@@ -410,7 +410,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
         // lambda
         let lambda: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
-        let mut cur_challenge = lambda;
+        let mut cur_challenge = G::ScalarField::one();
 
         // Fresh random challenge x
         fs_rng.absorb(&to_bytes![batch_commitment].unwrap());
@@ -846,7 +846,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         // as the statement of the opening proof is already bound to the interal state of the fr_rng,
         // we simply squeeze the challenge scalar for the random linear combination
         let lambda: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
-        let mut cur_challenge = lambda;
+        let mut cur_challenge = G::ScalarField::one();
 
         for (labeled_polynomial, (labeled_commitment, labeled_randomness)) in
         polys_iter.zip(comms_iter.zip(rands_iter))
@@ -1117,7 +1117,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         // The statment of the opening proof is already absorbed, hence we simply can squeeze
         let lambda: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
-        let mut cur_challenge = lambda;
+        let mut cur_challenge = G::ScalarField::one();
 
         let poly_map: BTreeMap<_, _> = labeled_polynomials
             .iter()
