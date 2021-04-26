@@ -42,7 +42,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     const PROTOCOL_NAME: &'static [u8] = b"PC-DL-2020";
 
     /// The low-level single segment single poly commit function.
-    /// Create a Pedersen commitment to `scalars` using the commitment key `comm_key`.
+    /// Create a dlog commitment to `scalars` using the commitment key `comm_key`.
     /// Optionally, randomize the commitment using `hiding_generator` and `randomizer`.
     pub fn cm_commit(
         comm_key: &[G],
@@ -216,9 +216,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     }
 
     /// The succinct portion of verifying a single-point opening proof.
-    /// If successful, returns the (recomputed) reduction challenges
-    /// The succinct portion of `PC::check`. This algorithm runs in time
-    /// O(log d), where d is the degree of the committed polynomials.
+    /// If successful, returns the (recomputed) reduction challenge.
     pub fn succinct_check<'a>(
         vk: &VerifierKey<G>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Commitment<G>>>,
@@ -230,9 +228,11 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     ) -> Result<Option<SuccinctCheckPolynomial<G::ScalarField>>, Error> {
         let check_time = start_timer!(|| "Succinct checking");
 
-        // We do not assume that the vk length is equal to the segment size; therefore
-        // we read the segment size from the proof L and Rs vectors (i.e. the number
-        // of steps of the bullet reduction)
+        // We do not assume that the vk length is equal to the segment size.
+        // Instead, we read the segment size from the proof L and Rs vectors (i.e. the number
+        // of steps of the dlog reduction). Doing so allows us to easily verify 
+        // the dlog opening proofs produced by different size-restricted by means
+        // of a single vk.
         let log_key_len = proof.l_vec.len();
         let key_len = 1 << log_key_len;
 
@@ -468,7 +468,9 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         Ok((check_poly.unwrap(), proof.final_comm_key))
     }
 
-    /// Succinct verify proofs and, if valid, return their SuccinctCheckPolynomials and GFinals.
+    /// Succinct verify (a batch of) multi-point mulit-poly opening proofs and, if valid, 
+    /// return their SuccinctCheckPolynomials (the reduction challenges `xi`) and the
+    /// final committer keys `GFinal`.
     pub fn succinct_batch_check<'a>(
         vk:                 &VerifierKey<G>,
         commitments:        impl IntoIterator<Item = &'a [LabeledCommitment<Commitment<G>>]>,

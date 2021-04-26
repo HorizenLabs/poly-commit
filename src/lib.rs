@@ -319,6 +319,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         point: F,
         fs_rng: &mut Self::RandomOracle,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
+        // `rng` if needed for blinding 
         rng: Option<&mut dyn RngCore>,
     ) -> Result<Self::Proof, Self::Error>
         where
