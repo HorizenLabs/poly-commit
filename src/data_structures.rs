@@ -202,6 +202,12 @@ impl<C: PCCommitment> LabeledCommitment<C> {
     }
 }
 
+impl<C: PCCommitment> SemanticallyValid for LabeledCommitment<C> {
+    fn is_valid(&self) -> bool {
+        self.commitment.is_valid()
+    }
+}
+
 impl<C: PCCommitment> algebra::ToBytes for LabeledCommitment<C> {
     #[inline]
     fn write<W: Write>(&self, writer: W) -> IoResult<()> {

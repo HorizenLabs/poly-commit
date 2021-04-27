@@ -1,7 +1,7 @@
 use crate::*;
 use crate::{PCCommitterKey, PCVerifierKey, Vec};
 use algebra::{
-    Field, UniformRand, AffineCurve, PrimeField,
+    Field, UniformRand, AffineCurve, PrimeField, ToBytes,
 };
 use std::{
     io::{ Read, Write }, vec, convert::TryFrom,
@@ -72,6 +72,7 @@ impl<G: AffineCurve> SemanticallyValid for CommitterKey<G> {
             self.h.is_valid() &&
             self.s.is_valid() &&
             PCCommitterKey::supported_degree(self) <= self.max_degree
+            //TODO: Add also check on the hash field
     }
 }
 
@@ -176,11 +177,11 @@ impl<G: AffineCurve> PCCommitment for Commitment<G> {
     }
 
     fn has_degree_bound(&self) -> bool {
-        false
+        self.shifted_comm.is_some()
     }
 }
 
-impl<G: AffineCurve> algebra::ToBytes for Commitment<G> {
+impl<G: AffineCurve> ToBytes for Commitment<G> {
     #[inline]
     fn write<W: Write>(&self, writer: W) -> std::io::Result<()> {
         use std::io::{Error, ErrorKind};
@@ -266,7 +267,7 @@ pub struct Proof<G: AffineCurve> {
     /// Committer key from the last iteration within `open`
     pub final_comm_key: G,
 
-    /// Coefficient from the last iteration within open`
+    /// Coefficient from the last iteration within `open`
     pub c: G::ScalarField,
 
     /// Commitment to the blinding polynomial.
@@ -282,10 +283,24 @@ impl<G: AffineCurve> SemanticallyValid for Proof<G> {
     fn is_valid(&self) -> bool {
         self.l_vec.is_valid() &&
             self.r_vec.is_valid() &&
+            self.l_vec.len() == self.r_vec.len() &&
             self.final_comm_key.is_valid() &&
             self.c.is_valid() &&
-            if self.hiding_comm.is_some() { self.hiding_comm.as_ref().unwrap().is_valid() } else { true } &&
-            if self.rand.is_some() { self.rand.as_ref().unwrap().is_valid() } else { true }
+            {
+                if self.hiding_comm.is_some() {
+                    self.hiding_comm.as_ref().unwrap().is_valid() && self.rand.is_some()
+                } else {
+                    self.rand.is_none()
+                }
+            } &&
+            // No need to re-check the hiding comm as the && operator is short-circuit
+            {
+                if self.rand.is_some() {
+                    self.rand.as_ref().unwrap().is_valid()
+                } else {
+                    true
+                }
+            }
     }
 }
 

@@ -74,6 +74,13 @@ pub struct BatchLCProof<F: Field, PC: PolynomialCommitment<F>> {
     pub evals: Option<Vec<F>>,
 }
 
+impl<F: Field, PC: PolynomialCommitment<F>> SemanticallyValid for BatchLCProof<F, PC> {
+    fn is_valid(&self) -> bool {
+        self.proof.is_valid() &&
+            if self.evals.is_some() { self.evals.as_ref().unwrap().is_valid() } else { true }
+    }
+}
+
 /// Describes the interface for a polynomial commitment scheme that allows
 /// a sender to commit to multiple polynomials and later provide a succinct proof
 /// of evaluation for the corresponding commitments at a query set `Q`, while
@@ -561,8 +568,9 @@ fn lc_query_set_to_poly_query_set<'a, F: 'a + Field>(
 #[cfg(test)]
 pub mod tests {
     use crate::*;
-    use algebra::Field;
-    use algebra::serialize::test_canonical_serialize_deserialize;
+    use algebra::{
+        Field, serialize::test_canonical_serialize_deserialize, SemanticallyValid
+    };
     use rand::{distributions::Distribution, Rng, thread_rng};
 
     #[derive(Copy, Clone, Default)]
@@ -627,12 +635,15 @@ pub mod tests {
                 &pp,
                 supported_degree,
             )?;
+            assert!(ck.is_valid());
+            assert!(vk.is_valid());
             println!("Trimmed");
 
             test_canonical_serialize_deserialize(true, &ck);
             test_canonical_serialize_deserialize(true, &vk);
 
             let (comms, rands) = PC::commit(&ck, &polynomials, Some(rng))?;
+            assert!(comms.is_valid());
 
             let mut query_set = QuerySet::new();
             let mut values = Evaluations::new();
@@ -654,6 +665,7 @@ pub mod tests {
                 &rands,
                 Some(rng),
             )?;
+            assert!(proof.is_valid());
 
             test_canonical_serialize_deserialize(true, &proof);
 
@@ -777,12 +789,18 @@ pub mod tests {
                 &pp,
                 supported_degree,
             )?;
+
+            assert!(ck.is_valid());
+            assert!(vk.is_valid());
+
             println!("Trimmed");
 
             test_canonical_serialize_deserialize(true, &ck);
             test_canonical_serialize_deserialize(true, &vk);
 
             let (comms, rands) = PC::commit(&ck, &polynomials, Some(rng))?;
+
+            assert!(comms.is_valid());
 
             // Construct query set
             let mut query_set = QuerySet::new();
@@ -808,6 +826,8 @@ pub mod tests {
                 &rands,
                 Some(rng),
             )?;
+
+            assert!(proof.is_valid());
 
             test_canonical_serialize_deserialize(true, &proof);
 
@@ -919,9 +939,14 @@ pub mod tests {
                 &pp,
                 supported_degree,
             )?;
+
+            assert!(ck.is_valid());
+            assert!(vk.is_valid());
+
             println!("Trimmed");
 
             let (comms, rands) = PC::commit(&ck, &polynomials, Some(rng))?;
+            assert!(comms.is_valid());
 
             // Let's construct our equations
             let mut linear_combinations = Vec::new();
@@ -977,6 +1002,7 @@ pub mod tests {
                 &rands,
                 Some(rng),
             )?;
+            assert!(proof.is_valid());
 
             println!("Generated proof");
 
