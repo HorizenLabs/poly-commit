@@ -1,6 +1,6 @@
 use crate::{Rc, String, Vec};
 use algebra::Field;
-pub use algebra_utils::DensePolynomial as Polynomial;
+pub use algebra::DensePolynomial as Polynomial;
 use std::borrow::Borrow;
 use std::ops::{AddAssign, MulAssign, SubAssign};
 use rand_core::RngCore;
@@ -193,9 +193,8 @@ impl<C: PCCommitment> LabeledCommitment<C> {
 
 impl<C: PCCommitment> algebra::ToBytes for LabeledCommitment<C> {
     #[inline]
-    fn write<W: std::io::Write>(&self, mut w: W) -> std::io::Result<()> {
-        self.commitment.write(&mut w)?;
-        Ok(())
+    fn write<W: std::io::Write>(&self, writer: W) -> std::io::Result<()> {
+        self.commitment.write(writer)
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::*;
 use crate::{PCCommitterKey, PCVerifierKey, Vec};
-use algebra::{Field, ToBytes, to_bytes, UniformRand, AffineCurve};
+use algebra::{Field, PrimeField, ToBytes, to_bytes, UniformRand, AffineCurve};
 use std::vec;
 use rand_core::RngCore;
 
@@ -49,6 +49,9 @@ pub struct CommitterKey<G: AffineCurve> {
     /// The maximum degree supported by the parameters
     /// this key was derived from.
     pub max_degree: usize,
+
+    /// The hash of all the previous fields
+    pub hash: Vec<u8>,
 }
 
 impl<G: AffineCurve> PCCommitterKey for CommitterKey<G> {
@@ -198,7 +201,7 @@ pub struct Proof<G: AffineCurve> {
     /// Committer key from the last iteration within `open`
     pub final_comm_key: G,
 
-    /// Coefficient from the last iteration within withinopen`
+    /// Coefficient from the last iteration within open`
     pub c: G::ScalarField,
 
     /// Commitment to the blinding polynomial.
@@ -278,10 +281,10 @@ impl<G: AffineCurve> ToBytes for BatchProof<G> {
 /// This polynomial has the special property that it has a succinct description 
 /// and can be evaluated in `O(log(degree))` time, and the final committer key
 /// G_final can be computed via MSM from the its coefficients.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SuccinctCheckPolynomial<F: Field>(pub Vec<F>);
 
-impl<F: Field> SuccinctCheckPolynomial<F> {
+impl<F: PrimeField> SuccinctCheckPolynomial<F> {
 
     /// Slightly optimized way to compute it, taken from
     /// [o1-labs/marlin](https://github.com/o1-labs/marlin/blob/master/dlog/commitment/src/commitment.rs#L175)
