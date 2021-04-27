@@ -835,6 +835,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         }
 
         let combined_rand = if has_hiding {
+            // TODO: we need to absorb combined_rand, too.
+            // Alternatively, we absorb the combined_commitment instead of the hiding_commitment, 
+            // (this would be as in [BCMS20])
             Some(combined_rand)
         } else {
             None
@@ -896,6 +899,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             l_vec.push(lr[0]);
             r_vec.push(lr[1]);
 
+            // the previous challenge is bound to the internal state, hence 
+            // no need to absorb it
             fs_rng.absorb(&to_bytes![lr[0], lr[1]].unwrap());
 
             round_challenge = fs_rng.squeeze_128_bits_challenge();
@@ -959,7 +964,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let batch_time = start_timer!(|| "Multi poly multi point batching.");
 
-        // The statment of the opening proof is already absorbed, hence we simply can squeeze
+        // as the statement of the opening proof is already bound to the interal state of the fr_rng,
+        // we simply squeeze the challenge scalar for the random linear combination
         let lambda: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
         let mut cur_challenge = lambda;
 
@@ -1044,7 +1050,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             ];
         }
 
-        // Fresh random challenge x
+        // Fresh random challenge x for multi-point to single-point reduction.
+        // Except the `batch_commitment`, all other commitments are already bound 
+        // to the internal state of the Fiat-Shamir
         fs_rng.absorb(&to_bytes![batch_commitment].unwrap());
         let point: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
@@ -1079,6 +1087,9 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         end_timer!(batch_time);
 
+        // absorb the evaluations at the new challenge x
+        // The value of `batch_commitment` is determined by these and the initial 
+        // opening claims
         fs_rng.absorb(&to_bytes![batch_values.values().collect::<Vec<&G::ScalarField>>()].unwrap());
 
         let proof = Self::open_individual_opening_challenges(
