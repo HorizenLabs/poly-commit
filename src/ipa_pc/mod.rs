@@ -151,6 +151,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
             fs_rng.absorb(&to_bytes![hiding_comm].unwrap());
             let hiding_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
+            fs_rng.absorb(&(to_bytes![rand].unwrap()));
 
             combined_commitment_proj += &(hiding_comm.mul(hiding_challenge) - &vk.s.mul(rand));
         }
@@ -816,8 +817,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 hiding_commitment_proj,
             ]);
             hiding_commitment = Some(batch.pop().unwrap());
-            combined_commitment = batch.pop().unwrap();
-            
+
             // We assume that the commitments, the query point, and the evaluations are already
             // bound to the internal state of the Fiat-Shamir rng. Hence the same is true for 
             // the deterministically derived combined_commitment and its combined_v.
@@ -828,6 +828,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             // both for witnesses and commitments (and it's randomness)
             combined_polynomial += (hiding_challenge, &hiding_polynomial);
             combined_rand += &(hiding_challenge * &hiding_rand);
+            fs_rng.absorb(&to_bytes![combined_rand].unwrap());
             combined_commitment_proj +=
                 &(hiding_commitment_proj.mul(&hiding_challenge) - &ck.s.mul(combined_rand));
 
@@ -835,9 +836,6 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         }
 
         let combined_rand = if has_hiding {
-            // TODO: we need to absorb combined_rand, too.
-            // Alternatively, we absorb the combined_commitment instead. 
-            // (this would be as in [BCMS20])
             Some(combined_rand)
         } else {
             None
