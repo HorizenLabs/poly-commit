@@ -143,24 +143,21 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             }
         }
 
-        let mut combined_commitment = combined_commitment_proj.into_affine();
 
         assert_eq!(proof.hiding_comm.is_some(), proof.rand.is_some());
         if proof.hiding_comm.is_some() {
             let hiding_comm = proof.hiding_comm.unwrap();
             let rand = proof.rand.unwrap();
 
-            fs_rng.absorb(&to_bytes![combined_commitment, point, combined_v, hiding_comm].unwrap());
+            fs_rng.absorb(&to_bytes![hiding_comm].unwrap());
             let hiding_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
             combined_commitment_proj += &(hiding_comm.mul(hiding_challenge) - &vk.s.mul(rand));
-            combined_commitment = combined_commitment_proj.into_affine();
         }
 
         // Challenge for each round
         let mut round_challenges = Vec::with_capacity(log_d);
 
-        fs_rng.absorb(&to_bytes![combined_commitment, point, combined_v].unwrap());
         let mut round_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
         let h_prime = vk.h.mul(round_challenge);
@@ -292,7 +289,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
         let check_time = start_timer!(|| "Succinct check batched polynomial");
 
-        fs_rng.absorb(&to_bytes![batch_proof.batch_values.values().collect::<Vec<&G::ScalarField>>(), batch_commitment, point].unwrap());
+        fs_rng.absorb(&to_bytes![batch_proof.batch_values.values().collect::<Vec<&G::ScalarField>>()].unwrap());
 
         let d = vk.supported_degree();
 
@@ -789,15 +786,12 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         end_timer!(combine_time);
 
-        let combined_v = combined_polynomial.evaluate(point);
-
         // Pad the coefficients to the appropriate vector size
         let d = ck.supported_degree();
 
         // `log_d` is ceil(log2 (d + 1)), which is the number of steps to compute all of the challenges
         let log_d = algebra::log2(d + 1) as usize;
 
-        let mut combined_commitment;
         let mut hiding_commitment = None;
 
         if has_hiding {
@@ -827,7 +821,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             // We assume that the commitments, the query point, and the evaluations are already
             // bound to the internal state of the Fiat-Shamir rng. Hence the same is true for 
             // the deterministically derived combined_commitment and its combined_v.
-            fs_rng.absorb(&to_bytes![combined_commitment, point, combined_v, hiding_commitment.unwrap()].unwrap());
+            fs_rng.absorb(&to_bytes![hiding_commitment.unwrap()].unwrap());
             let hiding_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
             // compute random linear combination using the hiding_challenge, 
@@ -849,10 +843,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let proof_time =
             start_timer!(|| format!("Generating proof for degree {} combined polynomial", d + 1));
 
-        combined_commitment = combined_commitment_proj.into_affine();
-
         // 0-th challenge
-        fs_rng.absorb(&to_bytes![combined_commitment, point, combined_v].unwrap());
         let mut round_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
         let h_prime = ck.h.mul(round_challenge).into_affine();
@@ -1088,7 +1079,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         end_timer!(batch_time);
 
-        fs_rng.absorb(&to_bytes![batch_values.values().collect::<Vec<&G::ScalarField>>(), batch_commitment, point].unwrap());
+        fs_rng.absorb(&to_bytes![batch_values.values().collect::<Vec<&G::ScalarField>>()].unwrap());
 
         let proof = Self::open_individual_opening_challenges(
             ck,
