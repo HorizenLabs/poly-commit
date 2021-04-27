@@ -73,7 +73,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         point: G::ScalarField,
         values: impl IntoIterator<Item = G::ScalarField>,
         proof: &Proof<G>,
-        // This implementation assumes that the commitments, point and evaluations are already absorbed by the Fiat Shamir rng
+        // This implementation assumes that the commitments, point and evaluations are 
+        // already bound to the internal state of the Fiat Shamir rng
         fs_rng: &mut FiatShamirChaChaRng<D>,
     ) -> Option<SuccinctCheckPolynomial<G::ScalarField>> {
         let check_time = start_timer!(|| "Succinct checking");
@@ -669,6 +670,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let lambda: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
         let mut cur_challenge = lambda;
 
+        // compute the random linear combination using the powers of lambda
         for (labeled_polynomial, (labeled_commitment, labeled_randomness)) in
         polys_iter.zip(comms_iter.zip(rands_iter))
         {
@@ -712,12 +714,15 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             let mut comm_lc = <G::Projective as ProjectiveCurve>::zero();
             let mut rand_lc = G::ScalarField::zero();
 
+            // Compute the query-point dependent linear combination of the segments,
+            // both for witnesses, commitments (and their randomnesses, if hiding)
             for i in 0..segments_count {
                 let is = i * key_len;
                 let poly_single = Polynomial::from_coefficients_slice(
                     &polynomial.coeffs[i * key_len..core::cmp::min((i + 1) * key_len, p_len)]
                 );
                 let comm_single = commitment.comm[i];
+                // add x^{i*|S|}* p_i(X) of the segment polynomial p_i(X)
                 polynomial_lc += (point.pow(&[is as u64]), &poly_single);
                 comm_lc += &comm_single.mul(point.pow(&[is as u64]));
                 if has_hiding {
@@ -726,16 +731,24 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 }
             }
 
+            // add segment linear combination to overall combination, 
+            // both for witnesses, commitments (and their randomnesses, if hiding)
             combined_polynomial += (cur_challenge, &polynomial_lc);
             combined_commitment_proj += &comm_lc.mul(&cur_challenge);
             if has_hiding {
                 combined_rand += &(cur_challenge * &rand_lc);
             }
 
+            // next power of lambda
             cur_challenge = cur_challenge * &lambda;
 
+            // If we prove degree bound, we add the degree bound identity 
+            //  p_shift(X) - x^{|S|-d} p(X),
+            // where p(X) is the last segment polynomial, d its degree, |S| the
+            // segment size and p_shift(X) the shifted polynomial.
             if let Some(degree_bound_len) = degree_bound_len {
 
+                // degree bound relative to the last segment
                 let shifted_degree_bound = degree_bound_len % key_len - 1;
                 let last_segment_polynomial = Polynomial::from_coefficients_slice(
                     &polynomial.coeffs[(segments_count - 1) * key_len..p_len]
@@ -747,12 +760,15 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 );
                 let shift = -point.pow(&[(key_len - shifted_degree_bound - 1) as u64]);
 
+                // add the shifted polynomial p_shift(X) and its commitment
                 combined_polynomial += (cur_challenge, &shifted_polynomial);
                 combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
 
+                // add -x^{N-d} * p(X) and its commitment
                 combined_polynomial += (cur_challenge * &shift, &last_segment_polynomial);
                 combined_commitment_proj += &commitment.comm[segments_count - 1].mul(cur_challenge * &shift);
 
+                // add the randomnesses accordingly
                 if hiding_bound.is_some() {
                     let shifted_rand = randomness.shifted_rand;
                     assert!(
@@ -760,10 +776,13 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                         "shifted_rand.is_none() for {}",
                         label
                     );
+                    // randomness of p_shift(X)
                     combined_rand += &(cur_challenge * &shifted_rand.unwrap());
+                    // randomness of -x^{N-d} * p(X)
                     combined_rand += &(cur_challenge * &shift * &randomness.rand[segments_count - 1]);
                 }
 
+                // next power of lamba
                 cur_challenge = cur_challenge * &lambda;
             }
         }
@@ -784,10 +803,12 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         if has_hiding {
             let mut rng = rng.expect("hiding commitments require randomness");
             let hiding_time = start_timer!(|| "Applying hiding.");
+            // Sample mask polynomial of full (i.e. segement size) degree, and 
+            // commit it using hiding
             let mut hiding_polynomial = Polynomial::rand(d, &mut rng);
             hiding_polynomial -=
                 &Polynomial::from_coefficients_slice(&[hiding_polynomial.evaluate(point)]);
-
+            
             let hiding_rand = G::ScalarField::rand(rng);
             let hiding_commitment_proj = Self::cm_commit(
                 ck.comm_key.as_slice(),
@@ -802,10 +823,15 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             ]);
             hiding_commitment = Some(batch.pop().unwrap());
             combined_commitment = batch.pop().unwrap();
-
+            
+            // We assume that the commitments, the query point, and the evaluations are already
+            // bound to the internal state of the Fiat-Shamir rng. Hence the same is true for 
+            // the deterministically derived combined_commitment and its combined_v.
             fs_rng.absorb(&to_bytes![combined_commitment, point, combined_v, hiding_commitment.unwrap()].unwrap());
             let hiding_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
+            // compute random linear combination using the hiding_challenge, 
+            // both for witnesses and commitments (and it's randomness)
             combined_polynomial += (hiding_challenge, &hiding_polynomial);
             combined_rand += &(hiding_challenge * &hiding_rand);
             combined_commitment_proj +=
