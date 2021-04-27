@@ -836,7 +836,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let combined_rand = if has_hiding {
             // TODO: we need to absorb combined_rand, too.
-            // Alternatively, we absorb the combined_commitment instead of the hiding_commitment, 
+            // Alternatively, we absorb the combined_commitment instead. 
             // (this would be as in [BCMS20])
             Some(combined_rand)
         } else {
