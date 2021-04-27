@@ -215,7 +215,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         })
     }
 
-    /// The succinct portion of verifying a single-point opening proof.
+    /// The succinct portion of verifying a multi-poly single-point opening proof.
     /// If successful, returns the (recomputed) reduction challenge.
     pub fn succinct_check<'a>(
         vk: &VerifierKey<G>,

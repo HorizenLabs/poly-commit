@@ -679,10 +679,12 @@ pub mod tests {
             } = info;
 
             let rng = &mut thread_rng();
+            // sample random max_degree from 2 up to 64.
             let max_degree =
                 max_degree.unwrap_or(rand::distributions::Uniform::from(2..=64).sample(rng));
             let pp = PC::setup(max_degree)?;
 
+            // sample supported_degree if not defined
             let supported_degree = match supported_degree {
                 Some(0) => 0,
                 Some(d) => d,
@@ -699,25 +701,29 @@ pub mod tests {
                 None
             };
 
+            // sample the maximum number of segments from 5 up to 15.
             let seg_mul = rand::distributions::Uniform::from(5..=15).sample(rng);
             let mut labels = Vec::new();
             println!("Sampled supported degree");
 
-            // Generate polynomials
+            // sample `max_num_queries` query points
             let num_points_in_query_set =
                 rand::distributions::Uniform::from(1..=max_num_queries).sample(rng);
             for i in 0..num_polynomials {
                 let label = format!("Test{}", i);
                 labels.push(label.clone());
 
+                // sample polynomial of random degree 
                 let degree;
                 if segmented {
+                    // sample degree from 5*`supported_degree` up to `seg_mul`*`supported_degree`
                     degree = if supported_degree > 0 {
                         rand::distributions::Uniform::from(1..=supported_degree).sample(rng)
                     } else {
                         0
                     } * seg_mul;
                 } else {
+                    // sample degree from 1 up to `supported_degree`
                     degree = if supported_degree > 0 {
                         rand::distributions::Uniform::from(1..=supported_degree).sample(rng)
                     } else {
@@ -726,20 +732,23 @@ pub mod tests {
                 }
                 let poly = Polynomial::rand(degree, rng);
 
+                // If specified, we sample any degree bound larger than the degree of the
+                // polynomial.        
                 let degree_bound = if let Some(degree_bounds) = &mut degree_bounds {
-                    let degree_bound;
-                    if segmented {
-                        degree_bound = degree;
-                    } else {
-                        let range = rand::distributions::Uniform::from(degree..=supported_degree);
-                        degree_bound = range.sample(rng);
-                    }
+                    let segment_size = (supported_degree + 1).next_power_of_two();
+                    let num_segments = (degree+1)/segment_size + if (degree+1)%segment_size == 0 { 0 } else { 1 };
+                    let range = rand::distributions::Uniform::from(degree..num_segments*segment_size);
+                    let degree_bound = range.sample(rng);
                     degree_bounds.push(degree_bound);
                     Some(degree_bound)
                 } else {
                     None
                 };
 
+                // Sample hiding bound. The concrete value > 0 does not matter.
+                // TODO: Beyond `Some` or `None`, the hiding_bound is not used by the dlog PC,
+                // as randomization up to a certain number of queries is outsourced.
+                // We should think about how to treat that in future.
                 let hiding_bound = if num_points_in_query_set >= degree {
                     Some(degree)
                 } else {
@@ -770,7 +779,8 @@ pub mod tests {
 
             let (comms, rands) = PC::commit(&ck, &polynomials, Some(rng))?;
 
-            // Construct query set
+            // Construct "symmetric" query set, over which every polynomial
+            // is to be queried
             let mut query_set = QuerySet::new();
             let mut values = Evaluations::new();
             // let mut point = F::one();
