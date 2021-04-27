@@ -225,11 +225,10 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let log_key_len = proof.l_vec.len();
         let key_len = 1 << log_key_len;
 
-        if proof.l_vec.len() != proof.r_vec.len() || proof.l_vec.len() > log_key_len {
+        if proof.l_vec.len() != proof.r_vec.len()  {
             return Err(Error::IncorrectInputLength(
                 format!(
-                    "Expected proof vectors to be at most {:}. Instead, l_vec size is {:} and r_vec size is {:}",
-                    log_key_len,
+                    "expected l_vec size and r_vec size to be equal; instead l_vec size is {:} and r_vec size is {:}",
                     proof.l_vec.len(),
                     proof.r_vec.len()
                 )
