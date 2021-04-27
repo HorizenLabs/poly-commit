@@ -72,8 +72,9 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     pub fn open_check_polys<'a>(
         ck: &CommitterKey<G>,
         xi_s: impl IntoIterator<Item = &'a SuccinctCheckPolynomial<G::ScalarField>>,
-        g_fins: impl IntoIterator<Item = &'a Commitment<G>>,
         point: G::ScalarField,
+        // Assumption: the evaluation point and the (xi_s, g_fins) are already bound to the
+        // fs_rng state.
         fs_rng: &mut FiatShamirChaChaRng<D>,
     ) -> Result<Proof<G>, Error>
     {
@@ -82,7 +83,6 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
         let batch_time = start_timer!(|| "Compute and batch Bullet Polys and GFin commitments");
         let xi_s_vec = xi_s.into_iter().collect::<Vec<_>>();
-        let g_fins = g_fins.into_iter().collect::<Vec<_>>();
 
         // Compute the evaluations of the Bullet polynomials at point starting from the xi_s
         let values = xi_s_vec.par_iter().map(|xi_s| {
@@ -103,22 +103,13 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             batching_chal *= &random_scalar;
         }
 
-        // Compute combined check_poly and combined g_fin
-        let (mut combined_check_poly, combined_g_fin, combined_v) = batching_chals
+        // Compute combined check_poly
+        let mut combined_check_poly = batching_chals
             .into_par_iter()
             .zip(xi_s_vec)
-            .zip(values)
-            .zip(g_fins)
-            .map(|(((chal, xi_s), value), g_fin)| {
-                (
-                    Polynomial::from_coefficients_vec(xi_s.compute_scaled_coeffs(chal)),
-                    g_fin.comm[0].mul(chal),
-                    chal * value
-                )
-            }).reduce(
-                || (Polynomial::zero(), <G::Projective as ProjectiveCurve>::zero(), G::ScalarField::zero()),
-                |acc, poly_comm_val| (&acc.0 + &poly_comm_val.0, acc.1 + &poly_comm_val.1, acc.2 + &poly_comm_val.2)
-            );
+            .map(|(chal, xi_s)| {
+                Polynomial::from_coefficients_vec(xi_s.compute_scaled_coeffs(chal))
+            }).reduce(|| Polynomial::zero(), |acc, poly| &acc + &poly);
 
         // It's not necessary to use the full length of the ck if all the Bullet Polys are smaller:
         // trim the ck if that's the case
@@ -131,10 +122,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let proof_time =
             start_timer!(|| format!("Generating proof for degree {} combined polynomial", key_len));
 
-        let combined_g_fin = combined_g_fin.into_affine();
-
         // ith challenge
-        fs_rng.absorb(&to_bytes![combined_g_fin, point, combined_v].unwrap());
         let mut round_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
         let h_prime = ck.h.mul(round_challenge).into_affine();
@@ -475,7 +463,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         query_sets:         impl IntoIterator<Item = &'a QuerySet<'a, G::ScalarField>>,
         values:             impl IntoIterator<Item = &'a Evaluations<'a, G::ScalarField>>,
         proofs:             impl IntoIterator<Item = &'a BatchProof<G>>,
-        states:             impl IntoIterator<Item = &'a <FiatShamirChaChaRng<D> as FiatShamirRng>::Seed>,
+        states:             impl IntoIterator<Item = &'a <FiatShamirChaChaRng<D> as FiatShamirRng>::State>,
     ) -> Result<(Vec<SuccinctCheckPolynomial<G::ScalarField>>, Vec<G>), Error>
         where
             D::OutputSize: 'a
@@ -498,7 +486,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             .map(|((((commitments, query_set), values), proof), state)|
                 {
                     let mut fs_rng = FiatShamirChaChaRng::<D>::new();
-                    fs_rng.set_seed(state.clone());
+                    fs_rng.set_state(state.clone());
 
                     // Perform succinct check of i-th proof
                     let (challenges, final_comm_key) = Self::succinct_batch_check_individual_opening_challenges(
@@ -667,8 +655,6 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let mut generators = Self::sample_generators(max_degree + 3);
         end_timer!(setup_time);
 
-        let hash = D::digest(&to_bytes![generators, max_degree as u32].unwrap()).to_vec();
-
         let h = generators.pop().unwrap();
         let s = generators.pop().unwrap();
 
@@ -676,7 +662,6 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             comm_key: generators,
             h,
             s,
-            hash,
         };
 
         Ok(pp)
@@ -697,12 +682,19 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let trim_time =
             start_timer!(|| format!("Trimming to supported degree of {}", supported_degree));
 
+        let hash = D::digest(&to_bytes![
+            &pp.comm_key[0..(supported_degree + 1)],
+            pp.h.clone(),
+            pp.s.clone(),
+            pp.max_degree() as u32
+        ].unwrap()).to_vec();
+
         let ck = CommitterKey {
             comm_key: pp.comm_key[0..(supported_degree + 1)].to_vec(),
             h: pp.h.clone(),
             s: pp.s.clone(),
             max_degree: pp.max_degree(),
-            hash: pp.hash.clone(),
+            hash: hash.clone(),
         };
 
         let vk = VerifierKey {
@@ -710,7 +702,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             h: pp.h.clone(),
             s: pp.s.clone(),
             max_degree: pp.max_degree(),
-            hash: pp.hash.clone(),
+            hash: hash.clone(),
         };
 
         end_timer!(trim_time);

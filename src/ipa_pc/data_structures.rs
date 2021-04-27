@@ -16,9 +16,6 @@ pub struct UniversalParams<G: AffineCurve> {
 
     /// Some group generator specifically used for hiding.
     pub s: G,
-
-    /// The hash of the previous fields
-    pub hash: Vec<u8>,
 }
 
 impl<G: AffineCurve> PCUniversalParams for UniversalParams<G> {

@@ -9,8 +9,8 @@ use rand_core::{RngCore, SeedableRng};
 /// and the new seed material.
 // TODO: later: re-evaluate decision about ChaChaRng
 pub trait FiatShamirRng: RngCore {
-    /// Internal representation of the seed, useful to get and set
-    type Seed: Clone;
+    /// Internal State
+    type State: Clone;
 
     /// initialize the RNG
     fn new() -> Self;
@@ -29,10 +29,10 @@ pub trait FiatShamirRng: RngCore {
     }
 
     /// Get the internal state in the form of an instance of `Self::Seed`.
-    fn get_seed(&self) -> &Self::Seed;
+    fn get_state(&self) -> &Self::State;
 
     /// Set interal state according to the specified `new_seed`
-    fn set_seed(&mut self, new_seed: Self::Seed);
+    fn set_state(&mut self, new_state: Self::State);
 }
 
 /// A `SeedableRng` that refreshes its seed by hashing together the previous seed
@@ -69,7 +69,7 @@ impl<D: Digest> RngCore for FiatShamirChaChaRng<D> {
 
 impl<D: Digest> FiatShamirRng for FiatShamirChaChaRng<D> {
 
-    type Seed = GenericArray<u8, D::OutputSize>;
+    type State = GenericArray<u8, D::OutputSize>;
 
     fn new() -> Self {
         let seed = [0u8; 32];
@@ -105,13 +105,13 @@ impl<D: Digest> FiatShamirRng for FiatShamirChaChaRng<D> {
 
     /// Get `self.seed`.
     #[inline]
-    fn get_seed(&self) -> &Self::Seed {
+    fn get_state(&self) -> &Self::State {
         &self.seed
     }
 
     /// Set `self.seed` to the specified value
     #[inline]
-    fn set_seed(&mut self, new_seed: Self::Seed) {
-        self.seed = new_seed
+    fn set_state(&mut self, new_state: Self::State) {
+        self.seed = new_state
     }
 }
