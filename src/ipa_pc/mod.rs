@@ -18,10 +18,12 @@ use rayon::prelude::*;
 use algebra_kernels::polycommit::{get_kernels, get_gpu_min_length};
 
 use digest::Digest;
+use crate::rng::{FiatShamirRng, FiatShamirChaChaRng};
 
-/// A polynomial commitment scheme based on the hardness of the
-/// discrete logarithm problem in prime-order groups.
-/// The construction is described in detail in [[BCMS20]][pcdas].
+/// The dlog commitment scheme from Bootle et al. based on the hardness of the discrete 
+/// logarithm problem in prime-order groups.
+/// This implementation is according to the variant given in [[BCMS20]][pcdas], extended 
+/// to support polynomials of arbitrary degree via segmentation.
 ///
 /// Degree bound enforcement requires that (at least one of) the points at
 /// which a committed polynomial is evaluated are from a distribution that is
@@ -39,10 +41,8 @@ pub struct InnerProductArgPC<G: AffineCurve, D: Digest> {
 
 impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     /// `PROTOCOL_NAME` is used as a seed for the setup function.
-    pub const PROTOCOL_NAME: &'static [u8] = b"PC-DL-2020";
-
-    /// Create a Pedersen commitment to `scalars` using the commitment key `comm_key`.
-    /// Optionally, randomize the commitment using `hiding_generator` and `randomizer`.
+    const PROTOCOL_NAME: &'static [u8] = b"PC-DL-2020";
+    /// The low-level single segment single poly commit function.
     fn cm_commit(
         comm_key: &[G],
         scalars: &[G::ScalarField],
@@ -60,34 +60,22 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         comm
     }
 
-    fn compute_random_oracle_challenge(bytes: &[u8]) -> G::ScalarField {
-        let mut i = 0u64;
-        let mut challenge = None;
-        while challenge.is_none() {
-            let hash_input = to_bytes![bytes, i].unwrap();
-            let hash = D::digest(&hash_input);
-            challenge = <G::ScalarField as PrimeField>::from_random_bytes(&hash);
-
-            i += 1;
-        }
-
-        challenge.unwrap()
-    }
-
     #[inline]
     fn inner_product(l: &[G::ScalarField], r: &[G::ScalarField]) -> G::ScalarField {
         l.par_iter().zip(r).map(|(li, ri)| *li * ri).sum()
     }
 
-    /// The succinct portion of `PC::check`. This algorithm runs in time
-    /// O(log d), where d is the degree of the committed polynomials.
+    /// The succinct portion of verifying a single-point opening proof. 
+    /// If successful, returns the (recomputed) reduction challenges
     fn succinct_check<'a>(
         vk: &VerifierKey<G>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Commitment<G>>>,
         point: G::ScalarField,
         values: impl IntoIterator<Item = G::ScalarField>,
         proof: &Proof<G>,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
+        // This implementation assumes that the commitments, point and evaluations are 
+        // already bound to the internal state of the Fiat Shamir rng
+        fs_rng: &mut FiatShamirChaChaRng<D>,
     ) -> Option<SuccinctCheckPolynomial<G::ScalarField>> {
         let check_time = start_timer!(|| "Succinct checking");
 
@@ -101,9 +89,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let mut combined_commitment_proj = <G::Projective as ProjectiveCurve>::zero();
         let mut combined_v = G::ScalarField::zero();
 
-        let mut opening_challenge_counter = 0;
-        let mut cur_challenge = opening_challenges(opening_challenge_counter);
-        opening_challenge_counter += 1;
+        let lambda: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
+        let mut cur_challenge = lambda;
 
         let labeled_commitments = commitments.into_iter();
         let values = values.into_iter();
@@ -122,8 +109,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             }
             combined_commitment_proj += &comm_lc.mul(&cur_challenge);
 
-            cur_challenge = opening_challenges(opening_challenge_counter);
-            opening_challenge_counter += 1;
+            cur_challenge = cur_challenge * &lambda;
 
             let degree_bound = labeled_commitment.degree_bound();
 
@@ -153,30 +139,27 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
                 combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
                 combined_commitment_proj += &commitment.comm[segments_count - 1].mul(cur_challenge * &shift);
 
-                cur_challenge = opening_challenges(opening_challenge_counter);
-                opening_challenge_counter += 1;
+                cur_challenge = cur_challenge * &lambda;
             }
         }
 
-        let mut combined_commitment = combined_commitment_proj.into_affine();
 
         assert_eq!(proof.hiding_comm.is_some(), proof.rand.is_some());
         if proof.hiding_comm.is_some() {
             let hiding_comm = proof.hiding_comm.unwrap();
             let rand = proof.rand.unwrap();
 
-            let hiding_challenge = Self::compute_random_oracle_challenge(
-                &to_bytes![combined_commitment, point, combined_v, hiding_comm].unwrap(),
-            );
+            fs_rng.absorb(&to_bytes![hiding_comm].unwrap());
+            let hiding_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
+            fs_rng.absorb(&(to_bytes![rand].unwrap()));
+
             combined_commitment_proj += &(hiding_comm.mul(hiding_challenge) - &vk.s.mul(rand));
-            combined_commitment = combined_commitment_proj.into_affine();
         }
 
         // Challenge for each round
         let mut round_challenges = Vec::with_capacity(log_d);
-        let mut round_challenge = Self::compute_random_oracle_challenge(
-            &to_bytes![combined_commitment, point, combined_v].unwrap(),
-        );
+
+        let mut round_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
         let h_prime = vk.h.mul(round_challenge);
 
@@ -186,9 +169,10 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let r_iter = proof.r_vec.iter();
 
         for (l, r) in l_iter.zip(r_iter) {
-            round_challenge = Self::compute_random_oracle_challenge(
-                &to_bytes![round_challenge, l, r].unwrap(),
-            );
+
+            fs_rng.absorb(&to_bytes![l, r].unwrap());
+            round_challenge = fs_rng.squeeze_128_bits_challenge();
+
             round_challenges.push(round_challenge);
             round_commitment_proj +=
                 &(l.mul(round_challenge.inverse().unwrap()) + &r.mul(round_challenge));
@@ -214,7 +198,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         Some(check_poly)
     }
 
-    /// Perform the succinct check of proof, returning the succinct check polynomial (the xi_s)
+    /// Succinct check of a multi-point multi-poly opening proof from [[BDFG2020]](https://eprint.iacr.org/2020/081) 
+    /// If successful, returns the (recomputed) succinct check polynomial (the xi_s) 
     /// and the GFinal.
     fn succinct_batch_check_individual_opening_challenges<'a, R: RngCore>(
         vk: &VerifierKey<G>,
@@ -222,8 +207,9 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         query_set: &QuerySet<G::ScalarField>,
         values: &Evaluations<G::ScalarField>,
         batch_proof: &BatchProof<G>,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         _rng: &mut R,
+        // This implementation assumes that the commitments, query set and evaluations are already absorbed by the Fiat Shamir rng
+        fs_rng: &mut FiatShamirChaChaRng<D>,
     ) -> Result<(SuccinctCheckPolynomial<G::ScalarField>, G), Error>
     {
         let commitments: Vec<&'a LabeledCommitment<Commitment<G>>> = commitments.into_iter().map(|comm| comm).collect();
@@ -260,22 +246,13 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         // Commitment of the h(X) polynomial
         let batch_commitment = batch_proof.batch_commitment.clone();
 
-        // TODO: When we will move to Sponge-based construction, we will absorb the
-        //       batch_commitment only and then squeeze a new challenge
-        // Fresh random challenge x
-        let point = Self::compute_random_oracle_challenge(
-            &to_bytes![
-                batch_commitment,
-                points
-            ]
-                .unwrap(),
-        );
-
-        let mut opening_challenge_counter = 0;
-
         // lambda
-        let mut cur_challenge = opening_challenges(opening_challenge_counter);
-        opening_challenge_counter += 1;
+        let lambda: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
+        let mut cur_challenge = lambda;
+
+        // Fresh random challenge x
+        fs_rng.absorb(&to_bytes![batch_commitment].unwrap());
+        let point: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
         let mut computed_batch_v = G::ScalarField::zero();
 
@@ -283,8 +260,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
             computed_batch_v = computed_batch_v + &(cur_challenge * &((v_i - &y_i) / &(point - x_i)));
 
-            cur_challenge = opening_challenges(opening_challenge_counter);
-            opening_challenge_counter += 1;
+            cur_challenge = cur_challenge * &lambda;
         }
 
         let mut batch_values = vec![];
@@ -313,15 +289,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         end_timer!(evals_time);
 
         let check_time = start_timer!(|| "Succinct check batched polynomial");
-        let opening_challenge = Self::compute_random_oracle_challenge(
-            &to_bytes![
-                batch_proof.batch_values.values().collect::<Vec<&G::ScalarField>>(),
-                batch_commitment,
-                point
-            ]
-                .unwrap(),
-        );
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
+
+        fs_rng.absorb(&to_bytes![batch_proof.batch_values.values().collect::<Vec<&G::ScalarField>>()].unwrap());
 
         let d = vk.supported_degree();
 
@@ -339,7 +308,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             ));
         }
 
-        let check_poly = Self::succinct_check(vk, commitments, point, batch_values, proof, &opening_challenges);
+        let check_poly = Self::succinct_check(vk, commitments, point, batch_values, proof, fs_rng);
 
         if check_poly.is_none() {
             end_timer!(check_time);
@@ -352,6 +321,10 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         Ok((check_poly.unwrap(), proof.final_comm_key))
     }
 
+    /// Checks whether degree bounds are `situated' in the last segment of a polynomial
+    /// 
+    /// TODO: rename to check_bounds, or alternatively write a function that receives the
+    /// supposed degree, and which checks in addition whether the segment count is plausible.
     fn check_degrees_and_bounds(
         supported_degree: usize,
         p: &LabeledPolynomial<G::ScalarField>,
@@ -383,6 +356,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         Ok(())
     }
 
+    /// Checks if the degree bound is situated in the last segment.
     fn check_segments_and_bounds(
         bound: usize,
         segments_count: usize,
@@ -404,6 +378,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         Ok(())
     }
 
+    /// Computes the 'shifted' polynomial as needed for degree bound proofs.
     fn shift_polynomial(
         ck: &CommitterKey<G>,
         p: &Polynomial<G::ScalarField>,
@@ -419,6 +394,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         }
     }
 
+    /// Computing the base point vector of the commmitment scheme in a 
+    /// deterministic manner, given the PROTOCOL_NAME.
     fn sample_generators(num_generators: usize) -> Vec<G> {
         let generators: Vec<_> = (0..num_generators).into_par_iter()
             .map(|i| {
@@ -439,7 +416,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         G::Projective::batch_normalization_into_affine(generators)
     }
 
-    /// Perform bullet reduce at the commitment last stage
+    /// Perform a dlog reduction step as described in BCMS20
     fn polycommit_round_reduce(
         round_challenge: G::ScalarField,
         round_challenge_inv: G::ScalarField,
@@ -489,6 +466,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     }
 }
 
+/// Implementation of the PolynomialCommitment trait for the segmentized dlog commitment scheme 
 impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerProductArgPC<G, D> {
     type UniversalParams = UniversalParams<G>;
     type CommitterKey = CommitterKey<G>;
@@ -500,7 +478,10 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
     type Proof = Proof<G>;
     type BatchProof = BatchProof<G>;
     type Error = Error;
+    type RandomOracle = FiatShamirChaChaRng<D>;
 
+    /// Setup of the base point vector (deterministically derived from the 
+    /// PROTOCOL_NAME as seed).
     fn setup<R: RngCore>(
         max_degree: usize,
         _rng: &mut R,
@@ -524,9 +505,11 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         Ok(pp)
     }
 
+    /// Trims the base point vector of the setup function to a custom segment size
     fn trim(
         pp: &Self::UniversalParams,
-        supported_degree: usize,
+        // the segment size (TODO: let's rename it!)
+        supported_degree: usize, 
         _supported_hiding_bound: usize,
         _enforced_degree_bounds: Option<&[usize]>,
     ) -> Result<(Self::CommitterKey, Self::VerifierKey), Self::Error> {
@@ -558,7 +541,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         Ok((ck, vk))
     }
 
-    /// Outputs a commitment to `polynomial`.
+    /// Domain extended commit function, outputs a `segmented commitment' 
+    /// to a polynomial, regardless of its degree.
     fn commit<'a>(
         ck: &Self::CommitterKey,
         polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
@@ -646,14 +630,20 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         Ok((comms, rands))
     }
 
+    /// Single point multi poly open, allowing the random oracle to be passed from 
+    /// 'outside' to the function. 
+    /// CAUTION: This is a low-level function which assumes that the statement of the
+    /// opening proof (i.e. commitments, query point, and evaluations) is already bound 
+    /// to the internal state of the Fiat-Shamir rng.
     fn open_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         point: G::ScalarField,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
+        // This implementation assumes that commitments, query point and evaluations are already absorbed by the Fiat Shamir rng
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<Self::Proof, Self::Error>
         where
             Self::Commitment: 'a,
@@ -673,10 +663,12 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let combine_time = start_timer!(|| "Combining polynomials, randomness, and commitments.");
 
-        let mut opening_challenge_counter = 0;
-        let mut cur_challenge = opening_challenges(opening_challenge_counter);
-        opening_challenge_counter += 1;
+        // as the statement of the opening proof is already bound to the interal state of the fr_rng,
+        // we simply squeeze the challenge scalar for the random linear combination
+        let lambda: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
+        let mut cur_challenge = lambda;
 
+        // compute the random linear combination using the powers of lambda
         for (labeled_polynomial, (labeled_commitment, labeled_randomness)) in
         polys_iter.zip(comms_iter.zip(rands_iter))
         {
@@ -720,12 +712,15 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             let mut comm_lc = <G::Projective as ProjectiveCurve>::zero();
             let mut rand_lc = G::ScalarField::zero();
 
+            // Compute the query-point dependent linear combination of the segments,
+            // both for witnesses, commitments (and their randomnesses, if hiding)
             for i in 0..segments_count {
                 let is = i * key_len;
                 let poly_single = Polynomial::from_coefficients_slice(
                     &polynomial.coeffs[i * key_len..core::cmp::min((i + 1) * key_len, p_len)]
                 );
                 let comm_single = commitment.comm[i];
+                // add x^{i*|S|}* p_i(X) of the segment polynomial p_i(X)
                 polynomial_lc += (point.pow(&[is as u64]), &poly_single);
                 comm_lc += &comm_single.mul(point.pow(&[is as u64]));
                 if has_hiding {
@@ -734,17 +729,24 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 }
             }
 
+            // add segment linear combination to overall combination, 
+            // both for witnesses, commitments (and their randomnesses, if hiding)
             combined_polynomial += (cur_challenge, &polynomial_lc);
             combined_commitment_proj += &comm_lc.mul(&cur_challenge);
             if has_hiding {
                 combined_rand += &(cur_challenge * &rand_lc);
             }
 
-            cur_challenge = opening_challenges(opening_challenge_counter);
-            opening_challenge_counter += 1;
+            // next power of lambda
+            cur_challenge = cur_challenge * &lambda;
 
+            // If we prove degree bound, we add the degree bound identity 
+            //  p_shift(X) - x^{|S|-d} p(X),
+            // where p(X) is the last segment polynomial, d its degree, |S| the
+            // segment size and p_shift(X) the shifted polynomial.
             if let Some(degree_bound_len) = degree_bound_len {
 
+                // degree bound relative to the last segment
                 let shifted_degree_bound = degree_bound_len % key_len - 1;
                 let last_segment_polynomial = Polynomial::from_coefficients_slice(
                     &polynomial.coeffs[(segments_count - 1) * key_len..p_len]
@@ -756,12 +758,15 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 );
                 let shift = -point.pow(&[(key_len - shifted_degree_bound - 1) as u64]);
 
+                // add the shifted polynomial p_shift(X) and its commitment
                 combined_polynomial += (cur_challenge, &shifted_polynomial);
                 combined_commitment_proj += &commitment.shifted_comm.unwrap().mul(cur_challenge);
 
+                // add -x^{N-d} * p(X) and its commitment
                 combined_polynomial += (cur_challenge * &shift, &last_segment_polynomial);
                 combined_commitment_proj += &commitment.comm[segments_count - 1].mul(cur_challenge * &shift);
 
+                // add the randomnesses accordingly
                 if hiding_bound.is_some() {
                     let shifted_rand = randomness.shifted_rand;
                     assert!(
@@ -769,18 +774,18 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                         "shifted_rand.is_none() for {}",
                         label
                     );
+                    // randomness of p_shift(X)
                     combined_rand += &(cur_challenge * &shifted_rand.unwrap());
+                    // randomness of -x^{N-d} * p(X)
                     combined_rand += &(cur_challenge * &shift * &randomness.rand[segments_count - 1]);
                 }
 
-                cur_challenge = opening_challenges(opening_challenge_counter);
-                opening_challenge_counter += 1;
+                // next power of lamba
+                cur_challenge = cur_challenge * &lambda;
             }
         }
 
         end_timer!(combine_time);
-
-        let combined_v = combined_polynomial.evaluate(point);
 
         // Pad the coefficients to the appropriate vector size
         let d = ck.supported_degree();
@@ -788,16 +793,17 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         // `log_d` is ceil(log2 (d + 1)), which is the number of steps to compute all of the challenges
         let log_d = algebra::log2(d + 1) as usize;
 
-        let mut combined_commitment;
         let mut hiding_commitment = None;
 
         if has_hiding {
             let mut rng = rng.expect("hiding commitments require randomness");
             let hiding_time = start_timer!(|| "Applying hiding.");
+            // Sample mask polynomial of full (i.e. segement size) degree, and 
+            // commit it using hiding
             let mut hiding_polynomial = Polynomial::rand(d, &mut rng);
             hiding_polynomial -=
                 &Polynomial::from_coefficients_slice(&[hiding_polynomial.evaluate(point)]);
-
+            
             let hiding_rand = G::ScalarField::rand(rng);
             let hiding_commitment_proj = Self::cm_commit(
                 ck.comm_key.as_slice(),
@@ -811,19 +817,18 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 hiding_commitment_proj,
             ]);
             hiding_commitment = Some(batch.pop().unwrap());
-            combined_commitment = batch.pop().unwrap();
 
-            let hiding_challenge = Self::compute_random_oracle_challenge(
-                &to_bytes![
-                    combined_commitment,
-                    point,
-                    combined_v,
-                    hiding_commitment.unwrap()
-                ]
-                    .unwrap(),
-            );
+            // We assume that the commitments, the query point, and the evaluations are already
+            // bound to the internal state of the Fiat-Shamir rng. Hence the same is true for 
+            // the deterministically derived combined_commitment and its combined_v.
+            fs_rng.absorb(&to_bytes![hiding_commitment.unwrap()].unwrap());
+            let hiding_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
+
+            // compute random linear combination using the hiding_challenge, 
+            // both for witnesses and commitments (and it's randomness)
             combined_polynomial += (hiding_challenge, &hiding_polynomial);
             combined_rand += &(hiding_challenge * &hiding_rand);
+            fs_rng.absorb(&to_bytes![combined_rand].unwrap());
             combined_commitment_proj +=
                 &(hiding_commitment_proj.mul(&hiding_challenge) - &ck.s.mul(combined_rand));
 
@@ -839,12 +844,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let proof_time =
             start_timer!(|| format!("Generating proof for degree {} combined polynomial", d + 1));
 
-        combined_commitment = combined_commitment_proj.into_affine();
-
-        // ith challenge
-        let mut round_challenge = Self::compute_random_oracle_challenge(
-            &to_bytes![combined_commitment, point, combined_v].unwrap(),
-        );
+        // 0-th challenge
+        let mut round_challenge: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
         let h_prime = ck.h.mul(round_challenge).into_affine();
 
@@ -896,9 +897,11 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             l_vec.push(lr[0]);
             r_vec.push(lr[1]);
 
-            round_challenge = Self::compute_random_oracle_challenge(
-                &to_bytes![round_challenge, lr[0], lr[1]].unwrap(),
-            );
+            // the previous challenge is bound to the internal state, hence 
+            // no need to absorb it
+            fs_rng.absorb(&to_bytes![lr[0], lr[1]].unwrap());
+
+            round_challenge = fs_rng.squeeze_128_bits_challenge();
             let round_challenge_inv = round_challenge.inverse().unwrap();
 
             Self::polycommit_round_reduce(
@@ -934,19 +937,20 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         })
     }
 
-    /// The multi-point "batching" according to Boneh, et al. 2020, "Efficient polynomial commitment schemes for multiple points and polynomials", https://eprint.iacr.org/2020/081.
+    /// The multi point multi poly opening proof from [[BDFG2020]](https://eprint.iacr.org/2020/081) 
+    /// CAUTION: This is a low-level function which assumes that the statement of the
+    /// opening proof (i.e. commitments, query point, and evaluations) is already bound 
+    /// to the internal state of the Fiat-Shamir rng.
     fn batch_open_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<G::ScalarField>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<G::ScalarField>,
-        // TODO: In order to implement the Fiat-Shamir transform in a "clean" manner,
-        //       we need to pass a sponge instead of opening_challenges().
-        //       This sponge is then used to squeeze the opening challenge(s) as well
-        //       as the fresh query point x
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
+        // This implementation assumes that the commitments (as well as the query set and evaluations)
+        // are already absorbed by the Fiat Shamir rng
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<Self::BatchProof, Self::Error>
         where
             Self::Randomness: 'a,
@@ -958,11 +962,10 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         let batch_time = start_timer!(|| "Multi poly multi point batching.");
 
-        let mut opening_challenge_counter = 0;
-
-        // lambda
-        let mut cur_challenge = opening_challenges(opening_challenge_counter);
-        opening_challenge_counter += 1;
+        // as the statement of the opening proof is already bound to the interal state of the fr_rng,
+        // we simply squeeze the challenge scalar for the random linear combination
+        let lambda: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
+        let mut cur_challenge = lambda;
 
         let poly_map: BTreeMap<_, _> = labeled_polynomials
             .iter()
@@ -1004,8 +1007,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             batch_polynomial += (cur_challenge, &polynomial);
 
             // lambda^i
-            cur_challenge = opening_challenges(opening_challenge_counter);
-            opening_challenge_counter += 1;
+            cur_challenge = cur_challenge * &lambda;
         }
 
         let key_len = ck.comm_key.len();
@@ -1046,17 +1048,11 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             ];
         }
 
-
-        // TODO: When we will move to Sponge-based construction, we will absorb the batch_commitment
-        //       only and then squeeze a new challenge
-        // Fresh random challenge x
-        let point= Self::compute_random_oracle_challenge(
-            &to_bytes![
-                batch_commitment,
-                points
-            ]
-                .unwrap(),
-        );
+        // Fresh random challenge x for multi-point to single-point reduction.
+        // Except the `batch_commitment`, all other commitments are already bound 
+        // to the internal state of the Fiat-Shamir
+        fs_rng.absorb(&to_bytes![batch_commitment].unwrap());
+        let point: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
         // Values: v_i = p_i(x), where x is fresh random challenge
         let batch_values: BTreeMap<_, _> = labeled_polynomials
@@ -1089,24 +1085,19 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         end_timer!(batch_time);
 
-        let opening_challenge = Self::compute_random_oracle_challenge(
-            &to_bytes![
-                batch_values.values().collect::<Vec<&G::ScalarField>>(),
-                batch_commitment,
-                point
-            ]
-                .unwrap(),
-        );
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
+        // absorb the evaluations at the new challenge x
+        // The value of `batch_commitment` is determined by these and the initial 
+        // opening claims
+        fs_rng.absorb(&to_bytes![batch_values.values().collect::<Vec<&G::ScalarField>>()].unwrap());
 
         let proof = Self::open_individual_opening_challenges(
             ck,
             labeled_polynomials,
             commitments,
             point,
-            &opening_challenges,
             rands,
-            rng
+            rng,
+            fs_rng,
         )?;
 
         Ok(BatchProof {
@@ -1116,14 +1107,17 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         })
     }
 
+
+    /// The verification function of an opening proof produced by ``open_individual_opening_challenges()``
     fn check_individual_opening_challenges<'a>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         point: G::ScalarField,
         values: impl IntoIterator<Item = G::ScalarField>,
         proof: &Self::Proof,
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         _rng: Option<&mut dyn RngCore>,
+        // This implementation assumes that the commitments, point and evaluations are already absorbed by the Fiat Shamir rng
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a,
@@ -1146,7 +1140,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         }
 
         let check_poly =
-            Self::succinct_check(vk, commitments, point, values, proof, opening_challenges);
+            Self::succinct_check(vk, commitments, point, values, proof, fs_rng);
 
         if check_poly.is_none() {
             return Ok(false);
@@ -1174,18 +1168,16 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         Ok(true)
     }
 
+    /// Verifies a multi-point multi-poly opening proof from [[BDFG2020]](https://eprint.iacr.org/2020/081).
     fn batch_check_individual_opening_challenges<'a, R: RngCore>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<G::ScalarField>,
         evaluations: &Evaluations<G::ScalarField>,
         batch_proof: &Self::BatchProof,
-        // TODO: In order to implement the Fiat-Shamir transform in a "clean" manner,
-        //       we need to pass a sponge instead of opening_challenges(). This sponge
-        //       is then used to squeeze the opening challenge(s) as well as the fresh
-        //       query point x
-        opening_challenges: &dyn Fn(u64) -> G::ScalarField,
         rng: &mut R,
+        // This implementation assumes that commitments, query set and evaluations are already absorbed by the Fiat Shamir rng
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a,
@@ -1197,8 +1189,8 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             query_set,
             evaluations,
             batch_proof,
-            opening_challenges,
-            rng
+            rng,
+            fs_rng,
         )?;
 
         // DLOG hard part

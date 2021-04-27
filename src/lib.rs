@@ -19,6 +19,10 @@ pub use algebra_utils::fft::DensePolynomial as Polynomial;
 use std::iter::FromIterator;
 use rand_core::RngCore;
 
+/// Implements a Fiat-Shamir based Rng that allows one to incrementally update
+/// the seed based on new messages in the proof transcript.
+pub mod rng;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     rc::Rc,
@@ -33,6 +37,8 @@ pub use data_structures::*;
 /// Errors pertaining to query sets.
 pub mod error;
 pub use error::*;
+
+use crate::rng::FiatShamirRng;
 
 /// A random number generator that bypasses some limitations of the Rust borrow
 /// checker.
@@ -120,7 +126,8 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     type BatchProof: BatchPCProof + Clone;
     /// The error type for the scheme.
     type Error: std::error::Error + From<Error>;
-
+    /// Source of random data
+    type RandomOracle: FiatShamirRng;
     /// Constructs public parameters when given as input the maximum degree `degree`
     /// for the polynomial commitment scheme.
     fn setup<R: RngCore>(
@@ -158,60 +165,68 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         Self::Error,
     >;
 
+    /// Single point multi poly open:
     /// On input a list of labeled polynomials and a query point, `open` outputs a proof of evaluation
     /// of the polynomials at the query point.
+    /// For now it is just a wrapper for the low-level function `open_individual_opening_challenges()`
+    /// and hence assumes that the statement of the opening proof (i.e. the commitments, the query point,
+    /// and the evaluations) are bound to the state of the Fiat-Shamir rng. 
     fn open<'a>(
         ck: &Self::CommitterKey,
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         point: F,
-        opening_challenge: F,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<Self::Proof, Self::Error>
         where
             Self::Randomness: 'a,
             Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::open_individual_opening_challenges(
             ck,
             labeled_polynomials,
             commitments,
             point,
-            &opening_challenges,
             rands,
             rng,
+            fs_rng,
         )
     }
 
+    /// Multi point multi poly open:
     /// On input a list of labeled polynomials and a query set, `open` outputs a proof of evaluation
     /// of the polynomials at the points in the query set.
+    /// For now it is just a wrapper for the low-level function `open_individual_opening_challenges()`
+    /// and hence assumes that the statement of the opening proof (i.e. the commitments, the query set,
+    /// and the evaluations) are bound to the state of the Fiat-Shamir rng. 
+    /// TODO: rename this function
     fn batch_open<'a>(
         ck: &Self::CommitterKey,
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
-        opening_challenge: F,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<Self::BatchProof, Self::Error>
         where
             Self::Randomness: 'a,
             Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::batch_open_individual_opening_challenges(
             ck,
             labeled_polynomials,
             commitments,
             query_set,
-            &opening_challenges,
             rands,
             rng,
+            fs_rng,
         )
     }
 
+    /// Single point multi poly verify:
     /// Verifies that `values` are the evaluations at `point` of the polynomials
     /// committed inside `commitments`.
     fn check<'a>(
@@ -220,80 +235,85 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         point: F,
         values: impl IntoIterator<Item = F>,
         proof: &Self::Proof,
-        opening_challenge: F,
         rng: Option<&mut dyn RngCore>,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
+        // as in open(), setup Fiat-Shamir rng, etc.
         Self::check_individual_opening_challenges(
             vk,
             commitments,
             point,
             values,
             proof,
-            &opening_challenges,
             rng,
+            fs_rng,
         )
     }
 
+    /// Multi point multi poly verify:
     /// Checks that `values` are the true evaluations at `query_set` of the polynomials
     /// committed in `labeled_commitments`.
+    /// TODO: rename this function
     fn batch_check<'a, R: RngCore>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         evaluations: &Evaluations<F>,
         proof: &Self::BatchProof,
-        opening_challenge: F,
         rng: &mut R,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::batch_check_individual_opening_challenges(
             vk,
             commitments,
             query_set,
             evaluations,
             proof,
-            &opening_challenges,
             rng,
+            fs_rng,
         )
     }
 
+    /// Multi point multi LC open:
     /// On input a list of polynomials, linear combinations of those polynomials,
     /// and a query set, `open_combination` outputs a proof of evaluation of
     /// the combinations at the points in the query set.
+    /// For now it is just a wrapper for the low-level function `open_combinations_individual_opening_challenges()`
+    /// and hence assumes that the statement of the opening proof (i.e. the LCs, the query set,
+    /// and the evaluations) are bound to the state of the Fiat-Shamir rng. 
     fn open_combinations<'a>(
         ck: &Self::CommitterKey,
         linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
         polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
-        opening_challenge: F,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<BatchLCProof<F, Self>, Self::Error>
         where
             Self::Randomness: 'a,
             Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::open_combinations_individual_opening_challenges(
             ck,
             linear_combinations,
             polynomials,
             commitments,
             query_set,
-            &opening_challenges,
             rands,
             rng,
+            fs_rng,
         )
     }
 
+    /// Multi point multi LC verify.
     /// Checks that `evaluations` are the true evaluations at `query_set` of the
     /// linear combinations of polynomials committed in `commitments`.
     fn check_combinations<'a, R: RngCore>(
@@ -303,13 +323,12 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         eqn_query_set: &QuerySet<F>,
         eqn_evaluations: &Evaluations<F>,
         proof: &BatchLCProof<F, Self>,
-        opening_challenge: F,
         rng: &mut R,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a,
     {
-        let opening_challenges = |pow| opening_challenge.pow(&[pow]);
         Self::check_combinations_individual_opening_challenges(
             vk,
             linear_combinations,
@@ -317,75 +336,100 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             eqn_query_set,
             eqn_evaluations,
             proof,
-            &opening_challenges,
             rng,
+            fs_rng,
         )
     }
 
-    /// open but with individual challenges
+    /// Single point multi poly open, allowing the random oracle to be passed from
+    /// 'outside' to the function.
+    /// CAUTION: This is a low-level function to be handled carefully, typically
+    /// presuming that commitments and query_set is already bound to the internal
+    /// state of the Fiat-Shamir rng.
+    /// TODO: rename this function
     fn open_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         point: F,
-        opening_challenges: &dyn Fn(u64) -> F,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<Self::Proof, Self::Error>
         where
             Self::Randomness: 'a,
             Self::Commitment: 'a;
 
-    /// batch_open with individual challenges
+    /// Multi point multi poly open, allowing the random oracle to be passed from
+    /// 'outside' to the function.
+    /// CAUTION: This is a low-level function to be handled carefully, typically
+    /// presuming that commitments and query_set is already bound to the internal
+    /// state of the Fiat-Shamir rng.
+    /// TODO: rename this function
     fn batch_open_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
-        opening_challenges: &dyn Fn(u64) -> F,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<Self::BatchProof, Self::Error>
         where
             Self::Randomness: 'a,
             Self::Commitment: 'a;
 
-    /// check but with individual challenges
+    /// Single point multi poly verify, with random oracle passed from 'outside'.
+    /// CAUTION: This is a low-level function to be handled carefully, typically
+    /// presuming that commitments and query_set is already bound to the internal
+    /// state of the Fiat-Shamir rng.
+    /// TODO: rename this function
     fn check_individual_opening_challenges<'a>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         point: F,
         values: impl IntoIterator<Item = F>,
         proof: &Self::Proof,
-        opening_challenges: &dyn Fn(u64) -> F,
         rng: Option<&mut dyn RngCore>,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a;
 
-    /// batch_check but with individual challenges
+    /// Multi point multi poly verify, with random oracle passed from 'outside'.
+    /// CAUTION: This is a low-level function to be handled carefully, typically
+    /// presuming that commitments and query_set is already bound to the internal
+    /// state of the Fiat-Shamir rng.
+    // TODO: rename this function
     fn batch_check_individual_opening_challenges<'a, R: RngCore>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
         evaluations: &Evaluations<F>,
         proof: &Self::BatchProof,
-        opening_challenges: &dyn Fn(u64) -> F,
         rng: &mut R,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a;
 
-    /// open_combinations but with individual challenges
+    /// Default implementation of Multi point multi LC open, with random oracle passed from 'outside'.
+    /// Evaluates each of the (non-trivial) LC-polynomials at each of the query point the LC is queried.
+    /// CAUTION: This is a low-level function to be handled with carefully, presuming that
+    /// 1) the commitments
+    /// 2) their LC's, and
+    /// 3) the query set as well as the evaluations
+    /// are already bound to the internal state of the Fiat-Shamir rng.
+    // TODO: rename this function
     fn open_combinations_individual_opening_challenges<'a>(
         ck: &Self::CommitterKey,
         linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
         polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
-        opening_challenges: &dyn Fn(u64) -> F,
         rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
         rng: Option<&mut dyn RngCore>,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<BatchLCProof<F, Self>, Self::Error>
         where
             Self::Randomness: 'a,
@@ -401,9 +445,9 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             polynomials,
             commitments,
             &poly_query_set,
-            opening_challenges,
             rands,
             rng,
+            fs_rng,
         )?;
         Ok(BatchLCProof {
             proof,
@@ -411,7 +455,12 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         })
     }
 
-    /// check_combinations with individual challenges
+    /// Default implementation of Multi point multi LC verify, with random oracle passed from 'outside'.
+    /// Evaluates each of the (non-trivial) LC-polynomials at the query point.
+    /// CAUTION: This is a low-level function to be handled carefully, typically
+    /// presuming that commitments and query_set is already bound to the internal
+    /// state of the Fiat-Shamir rng.
+    /// TODO: rename this function
     fn check_combinations_individual_opening_challenges<'a, R: RngCore>(
         vk: &Self::VerifierKey,
         linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
@@ -419,8 +468,8 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         eqn_query_set: &QuerySet<F>,
         eqn_evaluations: &Evaluations<F>,
         proof: &BatchLCProof<F, Self>,
-        opening_challenges: &dyn Fn(u64) -> F,
         rng: &mut R,
+        fs_rng: &mut Self::RandomOracle,
     ) -> Result<bool, Self::Error>
         where
             Self::Commitment: 'a,
@@ -471,8 +520,8 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             &poly_query_set,
             &poly_evals,
             proof,
-            opening_challenges,
             rng,
+            fs_rng,
         )?;
 
         if !pc_result {
@@ -523,6 +572,9 @@ pub fn evaluate_query_set_to_vec<'a, F: Field>(
     v
 }
 
+/// Generic conversion of an LC query set into a poly query set, by
+/// considering every non-trivial poly of an LC to be evaluated at each
+/// point the LC is queried.
 fn lc_query_set_to_poly_query_set<'a, F: 'a + Field>(
     linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
     query_set: &QuerySet<F>,
@@ -532,7 +584,9 @@ fn lc_query_set_to_poly_query_set<'a, F: 'a + Field>(
     let linear_combinations = BTreeMap::from_iter(lc_s);
     for (lc_label, (point_label, point)) in query_set {
         if let Some(lc) = linear_combinations.get(lc_label) {
+            // select the non-trivial polynomials in the LC
             for (_, poly_label) in lc.iter().filter(|(_, l)| !l.is_one()) {
+                // add the poly to be queried at the point
                 if let LCTerm::PolyLabel(l) = poly_label {
                     poly_query_set.insert((l.into(), (point_label.clone(), *point)));
                 }
@@ -569,7 +623,6 @@ pub mod tests {
         query_set:               QuerySet<'a, F>,
         values:                  Evaluations<'a, F>,
         proof:                   PC::BatchProof,
-        opening_challenge:       F,
         polynomials:             Vec<LabeledPolynomial<F>>,
         num_polynomials:         usize,
         num_points_in_query_set: usize,
@@ -711,15 +764,15 @@ pub mod tests {
         }
         println!("Generated query set");
 
-        let opening_challenge = F::rand(rng);
+        let mut fs_rng = PC::RandomOracle::new();
         let proof = PC::batch_open(
             &ck,
             &polynomials,
             &comms,
             &query_set,
-            opening_challenge,
             &rands,
             Some(rng),
+            &mut fs_rng,
         )?;
 
         Ok(VerifierData {
@@ -728,7 +781,6 @@ pub mod tests {
             query_set,
             values,
             proof,
-            opening_challenge,
             polynomials,
             num_polynomials,
             num_points_in_query_set,
@@ -800,24 +852,25 @@ pub mod tests {
             }
             println!("Generated query set");
 
-            let opening_challenge = F::rand(rng);
+            let mut fs_rng = PC::RandomOracle::new();
             let proof = PC::batch_open(
                 &ck,
                 &polynomials,
                 &comms,
                 &query_set,
-                opening_challenge,
                 &rands,
                 Some(rng),
+                &mut fs_rng,
             )?;
+            let mut fs_rng = PC::RandomOracle::new();
             let result = PC::batch_check(
                 &vk,
                 &comms,
                 &query_set,
                 &values,
                 &proof,
-                opening_challenge,
                 rng,
+                &mut fs_rng
             )?;
             assert!(result, "proof was incorrect, Query set: {:#?}", query_set);
         }
@@ -836,21 +889,21 @@ pub mod tests {
                 query_set,
                 values,
                 proof,
-                opening_challenge,
                 polynomials,
                 num_polynomials,
                 num_points_in_query_set,
                 ..
             } = get_data_for_verifier::<F, PC>(info, None).unwrap();
 
+            let mut fs_rng = PC::RandomOracle::new();
             let result = PC::batch_check(
                 &vk,
                 &comms,
                 &query_set,
                 &values,
                 &proof,
-                opening_challenge,
                 &mut thread_rng(),
+                &mut fs_rng
             )?;
             if !result {
                 println!(
@@ -1000,18 +1053,21 @@ pub mod tests {
             println!("Generated query set");
             println!("Linear combinations: {:?}", linear_combinations);
 
-            let opening_challenge = F::rand(rng);
+            let mut fs_rng = PC::RandomOracle::new();
             let proof = PC::open_combinations(
                 &ck,
                 &linear_combinations,
                 &polynomials,
                 &comms,
                 &query_set,
-                opening_challenge,
                 &rands,
                 Some(rng),
+                &mut fs_rng,
             )?;
+
             println!("Generated proof");
+
+            let mut fs_rng = PC::RandomOracle::new();
             let result = PC::check_combinations(
                 &vk,
                 &linear_combinations,
@@ -1019,9 +1075,10 @@ pub mod tests {
                 &query_set,
                 &values,
                 &proof,
-                opening_challenge,
                 rng,
+                &mut fs_rng,
             )?;
+
             if !result {
                 println!(
                     "Failed with {} polynomials, num_points_in_query_set: {:?}",
