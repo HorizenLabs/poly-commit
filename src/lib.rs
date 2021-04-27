@@ -14,9 +14,8 @@ extern crate derivative;
 #[macro_use]
 extern crate bench_utils;
 
-use algebra::Field;
+use algebra::{Field, serialize::*, SemanticallyValid};
 pub use algebra::fft::DensePolynomial as Polynomial;
-use std::iter::FromIterator;
 use rand_core::RngCore;
 
 /// Implements a Fiat-Shamir based Rng that allows one to incrementally update
@@ -28,6 +27,8 @@ use std::{
     rc::Rc,
     string::{String, ToString},
     vec::Vec,
+    fmt::Debug,
+    iter::FromIterator
 };
 
 /// Data structures used by a polynomial commitment scheme.
@@ -65,12 +66,19 @@ pub type QuerySet<'a, F> = BTreeSet<(String, (String, F))>;
 pub type Evaluations<'a, F> = BTreeMap<(String, F), F>;
 
 /// A proof of satisfaction of linear combinations.
-#[derive(Clone)]
+#[derive(Clone, CanonicalSerialize, CanonicalDeserialize)]
 pub struct BatchLCProof<F: Field, PC: PolynomialCommitment<F>> {
     /// Evaluation proof.
     pub proof: PC::BatchProof,
     /// Evaluations required to verify the proof.
     pub evals: Option<Vec<F>>,
+}
+
+impl<F: Field, PC: PolynomialCommitment<F>> SemanticallyValid for BatchLCProof<F, PC> {
+    fn is_valid(&self) -> bool {
+        self.proof.is_valid() &&
+            if self.evals.is_some() { self.evals.as_ref().unwrap().is_valid() } else { true }
+    }
 }
 
 /// Describes the interface for a polynomial commitment scheme that allows
@@ -89,15 +97,15 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// The prepared verifier key for the scheme; used to check an evaluation proof.
     type PreparedVerifierKey: PCPreparedVerifierKey<Self::VerifierKey> + Clone;
     /// The commitment to a polynomial.
-    type Commitment: PCCommitment + Default + algebra::ToBytes;
+    type Commitment: PCCommitment + Default + Debug + Eq + PartialEq;
     /// The prepared commitment to a polynomial.
     type PreparedCommitment: PCPreparedCommitment<Self::Commitment>;
     /// The commitment randomness.
     type Randomness: PCRandomness;
     /// The evaluation proof for a single point.
-    type Proof: PCProof + Clone;
+    type Proof: Clone + Debug + Eq + PartialEq + CanonicalSerialize + CanonicalDeserialize;
     /// The evaluation proof for a query set.
-    type BatchProof: BatchPCProof + Clone;
+    type BatchProof: Clone + Debug + Eq + PartialEq + CanonicalSerialize + CanonicalDeserialize + SemanticallyValid;
     /// The error type for the scheme.
     type Error: std::error::Error + From<Error>;
     /// Source of random data
@@ -561,7 +569,9 @@ fn lc_query_set_to_poly_query_set<'a, F: 'a + Field>(
 #[cfg(test)]
 pub mod tests {
     use crate::*;
-    use algebra::Field;
+    use algebra::{
+        Field, serialize::test_canonical_serialize_deserialize, SemanticallyValid
+    };
     use rand::{distributions::Distribution, Rng, thread_rng};
 
     #[derive(Copy, Clone, Default)]
@@ -584,6 +594,8 @@ pub mod tests {
         let rng = &mut thread_rng();
         let max_degree = 100;
         let pp = PC::setup(max_degree)?;
+
+        test_canonical_serialize_deserialize(true, &pp);
 
         for _ in 0..10 {
             let supported_degree = rand::distributions::Uniform::from(1..=max_degree).sample(rng);
@@ -624,9 +636,15 @@ pub mod tests {
                 &pp,
                 supported_degree,
             )?;
+            assert!(ck.is_valid());
+            assert!(vk.is_valid());
             println!("Trimmed");
 
+            test_canonical_serialize_deserialize(true, &ck);
+            test_canonical_serialize_deserialize(true, &vk);
+
             let (comms, rands) = PC::commit(&ck, &polynomials, Some(rng))?;
+            assert!(comms.is_valid());
 
             let mut query_set = QuerySet::new();
             let mut values = Evaluations::new();
@@ -648,6 +666,10 @@ pub mod tests {
                 &rands,
                 Some(rng),
             )?;
+            assert!(proof.is_valid());
+
+            test_canonical_serialize_deserialize(true, &proof);
+
             let mut fs_rng = PC::RandomOracle::new();
             let result = PC::batch_check(
                 &vk,
@@ -683,6 +705,8 @@ pub mod tests {
             let max_degree =
                 max_degree.unwrap_or(rand::distributions::Uniform::from(2..=64).sample(rng));
             let pp = PC::setup(max_degree)?;
+
+            test_canonical_serialize_deserialize(true, &pp);
 
             // sample supported_degree if not defined
             let supported_degree = match supported_degree {
@@ -775,9 +799,18 @@ pub mod tests {
                 &pp,
                 supported_degree,
             )?;
+
+            assert!(ck.is_valid());
+            assert!(vk.is_valid());
+
             println!("Trimmed");
 
+            test_canonical_serialize_deserialize(true, &ck);
+            test_canonical_serialize_deserialize(true, &vk);
+
             let (comms, rands) = PC::commit(&ck, &polynomials, Some(rng))?;
+
+            assert!(comms.is_valid());
 
             // Construct "symmetric" query set, over which every polynomial
             // is to be queried
@@ -804,6 +837,10 @@ pub mod tests {
                 &rands,
                 Some(rng),
             )?;
+
+            assert!(proof.is_valid());
+
+            test_canonical_serialize_deserialize(true, &proof);
 
             let mut fs_rng = PC::RandomOracle::new();
             let result = PC::batch_check(
@@ -913,9 +950,14 @@ pub mod tests {
                 &pp,
                 supported_degree,
             )?;
+
+            assert!(ck.is_valid());
+            assert!(vk.is_valid());
+
             println!("Trimmed");
 
             let (comms, rands) = PC::commit(&ck, &polynomials, Some(rng))?;
+            assert!(comms.is_valid());
 
             // Let's construct our equations
             let mut linear_combinations = Vec::new();
@@ -971,6 +1013,7 @@ pub mod tests {
                 &rands,
                 Some(rng),
             )?;
+            assert!(proof.is_valid());
 
             println!("Generated proof");
 
@@ -1012,7 +1055,7 @@ pub mod tests {
         let info = TestInfo {
             num_iters: 100,
             max_degree: None,
-            supported_degree: Some(0),
+            supported_degree: None,
             num_polynomials: 1,
             enforce_degree_bounds: false,
             max_num_queries: 1,

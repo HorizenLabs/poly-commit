@@ -39,7 +39,7 @@ pub struct InnerProductArgPC<G: AffineCurve, D: Digest> {
 
 impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     /// `PROTOCOL_NAME` is used as a seed for the setup function.
-    const PROTOCOL_NAME: &'static [u8] = b"PC-DL-2020";
+    const PROTOCOL_NAME: &'static [u8] = b"PC-DL-2021";
 
     /// The low-level single segment single poly commit function.
     /// Create a dlog commitment to `scalars` using the commitment key `comm_key`.
@@ -614,6 +614,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         k_l: &mut [G::Projective],
         k_r: &[G],
     ) {
+
         c_l.par_iter_mut()
             .zip(c_r)
             .for_each(|(c_l, c_r)| *c_l += &(round_challenge_inv * c_r));
