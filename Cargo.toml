@@ -20,9 +20,9 @@ license = "MIT/Apache-2.0"
 edition = "2018"
 
 [dependencies]
-algebra = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "algebra_ocl", features = ["parallel"] }
-algebra-utils = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "algebra_ocl", features = [ "parallel", "fft" ] }
-bench-utils = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "algebra_ocl" }
+algebra = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "optimizations_asm", features = ["parallel"] }
+algebra-utils = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "optimizations_asm", features = [ "parallel", "fft" ] }
+bench-utils = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "optimizations_asm" }
 rand = { version = "0.7", default-features = false }
 rand_chacha = { version = "0.2.1", default-features = false }
 rand_core = { version = "0.5", default-features = false }
@@ -34,7 +34,7 @@ derivative = { version = "2" }
 algebra-kernels = {git = "https://github.com/HorizenOfficial/ginger-algebra-ocl", branch = "ginger_ocl", optional = true }
 
 [dev-dependencies]
-algebra = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "algebra_ocl", features = ["bls12_381", "jubjub", "bn_382", "bls12_377", "tweedle"] }
+algebra = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "optimizations_asm", features = ["bls12_381", "jubjub", "bn_382", "bls12_377", "tweedle"] }
 
 criterion = "0.3"
 rand_xorshift = "0.2"
