@@ -1,8 +1,12 @@
 use crate::{Rc, String, Vec};
-use algebra::Field;
-pub use algebra_utils::DensePolynomial as Polynomial;
-use std::borrow::Borrow;
-use std::ops::{AddAssign, MulAssign, SubAssign};
+use algebra::{Field, serialize::{CanonicalSerialize, CanonicalDeserialize, SerializationError}, SemanticallyValid};
+pub use algebra::DensePolynomial as Polynomial;
+use std::{
+    io::{Read, Write, Error as IoError, ErrorKind, Result as IoResult},
+    ops::{AddAssign, MulAssign, SubAssign},
+    borrow::Borrow,
+    fmt::Debug,
+};
 use rand_core::RngCore;
 
 /// Labels a `LabeledPolynomial` or a `LabeledCommitment`.
@@ -10,14 +14,24 @@ pub type PolynomialLabel = String;
 
 /// Defines the minimal interface for public params for any polynomial
 /// commitment scheme.
-pub trait PCUniversalParams: Clone + std::fmt::Debug {
+pub trait PCUniversalParams:
+    Clone + Debug + CanonicalSerialize + CanonicalDeserialize + Eq + PartialEq
+{
     /// Outputs the maximum degree supported by the committer key.
     fn max_degree(&self) -> usize;
 }
 
 /// Defines the minimal interface of committer keys for any polynomial
 /// commitment scheme.
-pub trait PCCommitterKey: Clone + std::fmt::Debug + Eq + PartialEq {
+pub trait PCCommitterKey:
+    Clone +
+    Debug +
+    Eq +
+    PartialEq +
+    CanonicalSerialize +
+    CanonicalDeserialize +
+    SemanticallyValid
+{
     /// Outputs the maximum degree supported by the universal parameters
     /// `Self` was derived from.
     fn max_degree(&self) -> usize;
@@ -28,7 +42,15 @@ pub trait PCCommitterKey: Clone + std::fmt::Debug + Eq + PartialEq {
 
 /// Defines the minimal interface of verifier keys for any polynomial
 /// commitment scheme.
-pub trait PCVerifierKey: Clone + std::fmt::Debug + Eq + PartialEq {
+pub trait PCVerifierKey:
+    Clone +
+    Debug +
+    Eq +
+    PartialEq +
+    CanonicalSerialize +
+    CanonicalDeserialize +
+    SemanticallyValid
+{
     /// Outputs the maximum degree supported by the universal parameters
     /// `Self` was derived from.
     fn max_degree(&self) -> usize;
@@ -46,15 +68,18 @@ pub trait PCPreparedVerifierKey<Unprepared: PCVerifierKey> {
 
 /// Defines the minimal interface of commitments for any polynomial
 /// commitment scheme.
-pub trait PCCommitment: Clone + algebra::ToBytes {
+pub trait PCCommitment:
+    Clone
+    + CanonicalSerialize
+    + CanonicalDeserialize
+    + algebra::ToBytes
+    + SemanticallyValid
+{
     /// Outputs a non-hiding commitment to the zero polynomial.
     fn empty() -> Self;
 
     /// Does this commitment have a degree bound?
     fn has_degree_bound(&self) -> bool;
-
-    /// Size in bytes
-    fn size_in_bytes(&self) -> usize;
 }
 
 /// Defines the minimal interface of prepared commitments for any polynomial
@@ -66,7 +91,7 @@ pub trait PCPreparedCommitment<UNPREPARED: PCCommitment>: Clone {
 
 /// Defines the minimal interface of commitment randomness for any polynomial
 /// commitment scheme.
-pub trait PCRandomness: Clone {
+pub trait PCRandomness: Clone + Debug + Eq + PartialEq + CanonicalSerialize + CanonicalDeserialize {
     /// Outputs empty randomness that does not hide the commitment.
     fn empty(segments_count: usize) -> Self;
 
@@ -77,24 +102,10 @@ pub trait PCRandomness: Clone {
     fn rand<R: RngCore>(num_queries: usize, has_degree_bound: bool, rng: &mut R) -> Self;
 }
 
-/// Defines the minimal interface of evaluation proofs for any polynomial
-/// commitment scheme.
-pub trait PCProof: Clone + algebra::ToBytes {
-    /// Size in bytes
-    fn size_in_bytes(&self) -> usize;
-}
-
-/// Defines the minimal interface of evaluation proofs for any polynomial
-/// batch commitment scheme.
-pub trait BatchPCProof: Clone + algebra::ToBytes {
-    /// Size in bytes
-    fn size_in_bytes(&self) -> usize;
-}
-
 /// A polynomial along with information about its degree bound (if any), and the
 /// maximum number of queries that will be made to it. This latter number determines
 /// the amount of protection that will be provided to a commitment for this polynomial.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct LabeledPolynomial<F: Field> {
     label: PolynomialLabel,
     polynomial: Rc<Polynomial<F>>,
@@ -191,24 +202,31 @@ impl<C: PCCommitment> LabeledCommitment<C> {
     }
 }
 
+impl<C: PCCommitment> SemanticallyValid for LabeledCommitment<C> {
+    fn is_valid(&self) -> bool {
+        self.commitment.is_valid()
+    }
+}
+
 impl<C: PCCommitment> algebra::ToBytes for LabeledCommitment<C> {
     #[inline]
-    fn write<W: std::io::Write>(&self, mut w: W) -> std::io::Result<()> {
-        self.commitment.write(&mut w)?;
-        Ok(())
+    fn write<W: Write>(&self, writer: W) -> IoResult<()> {
+
+        self.commitment.serialize_uncompressed(writer)
+            .map_err(|e| IoError::new(ErrorKind::Other, format!{"{:?}", e}))
     }
 }
 
 /// A labeled randomness.
-#[derive(Clone)]
-pub struct LabeledRandomness<R: PCRandomness> {
+#[derive(Clone, Debug, Eq, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
+pub struct LabeledRandomness<Rand: PCRandomness> {
     label: PolynomialLabel,
-    randomness: R,
+    randomness: Rand,
 }
 
-impl<R: PCRandomness> LabeledRandomness<R> {
+impl<Rand: PCRandomness> LabeledRandomness<Rand> {
     /// Instantiate a new randomness_context.
-    pub fn new(label: PolynomialLabel, randomness: R) -> Self {
+    pub fn new(label: PolynomialLabel, randomness: Rand) -> Self {
         Self {
             label,
             randomness,
@@ -221,7 +239,7 @@ impl<R: PCRandomness> LabeledRandomness<R> {
     }
 
     /// Retrieve the commitment from `self`.
-    pub fn randomness(&self) -> &R {
+    pub fn randomness(&self) -> &Rand {
         &self.randomness
     }
 }
