@@ -359,14 +359,19 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         fs_rng: &mut FiatShamirChaChaRng<D>,
     ) -> Result<(SuccinctCheckPolynomial<G::ScalarField>, G), Error>
     {
-        let mut commitments: Vec<&'a LabeledCommitment<Commitment<G>>> = commitments.into_iter().map(|comm| comm).collect();
+        let commitments: Vec<&'a LabeledCommitment<Commitment<G>>> = commitments.into_iter().map(|comm| comm).collect();
 
-        commitments.sort_by(|a, b| a.label().cmp(b.label()));
+        let mut labels: Vec<_> = commitments
+            .iter()
+            .map(|c| c.label())
+            .collect();
 
-        let labels: BTreeMap<_, _> = commitments
+        labels.sort_by(|a, b| a.cmp(&b));
+
+        let labels: BTreeMap<_, _> = labels
             .iter()
             .enumerate()
-            .map(|(i, &item)| (item.label(), i))
+            .map(|(i, &item)| (item, i))
             .collect();
 
         let batch_check_time = start_timer!(|| "Multi poly multi point batch check: succinct part");
@@ -422,7 +427,17 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             cur_challenge = cur_challenge * &lambda;
         }
 
-        let mut batch_values = batch_proof.batch_values.clone();
+        let mut batch_values = vec![];
+        for labeled_commitment in commitments.iter() {
+            batch_values.push(batch_proof.batch_values[
+                *labels
+                    .get(labeled_commitment.label())
+                    .ok_or(Error::MissingEvaluation {
+                        label: labeled_commitment.label().to_string(),
+                    })?
+                ]
+            );
+        }
 
         // Reconstructed v value added to the check
         batch_values.push(computed_batch_v);
@@ -1124,11 +1139,22 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             Self::Randomness: 'a,
             Self::Commitment: 'a,
     {
-        let mut labeled_polynomials: Vec<&'a LabeledPolynomial<G::ScalarField>> = labeled_polynomials.into_iter().map(|poly| poly).collect();
+        let labeled_polynomials: Vec<&'a LabeledPolynomial<G::ScalarField>> = labeled_polynomials.into_iter().map(|poly| poly).collect();
         let commitments: Vec<&'a LabeledCommitment<Self::Commitment>> = commitments.into_iter().map(|comm| comm).collect();
         let rands: Vec<&'a LabeledRandomness<Self::Randomness>> = rands.into_iter().map(|rand| rand).collect();
 
-        labeled_polynomials.sort_by(|a, b| a.label().cmp(b.label()));
+        let mut labels: Vec<_> = labeled_polynomials
+            .iter()
+            .map(|c| c.label())
+            .collect();
+
+        labels.sort_by(|a, b| a.cmp(&b));
+
+        let labels: BTreeMap<_, _> = labels
+            .iter()
+            .enumerate()
+            .map(|(i, &item)| (item, i))
+            .collect();
 
         let batch_time = start_timer!(|| "Multi poly multi point batching.");
 
@@ -1230,10 +1256,16 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let point: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
         // Values: v_i = p_i(x), where x is fresh random challenge
-        let batch_values: Vec<_> = labeled_polynomials
-            .iter()
-            .map(|labeled_polynomial| labeled_polynomial.polynomial().evaluate(point))
-            .collect();
+        let mut batch_values = vec![G::ScalarField::zero(); labeled_polynomials.len()];
+        for labeled_polynomial in labeled_polynomials.iter() {
+            batch_values[
+                *labels
+                    .get(labeled_polynomial.label())
+                    .ok_or(Error::MissingEvaluation {
+                        label: labeled_polynomial.label().to_string(),
+                    })?
+            ] = labeled_polynomial.polynomial().evaluate(point);
+        }
 
         // h(X) polynomial added to the set of polynomials for multi-poly single-point batching
         let mut labeled_polynomials = labeled_polynomials;
