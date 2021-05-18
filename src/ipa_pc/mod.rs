@@ -897,7 +897,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 comm_lc += &comm_single.mul(point.pow(&[is as u64]));
                 if has_hiding {
                     let rand_single = randomness.rand[i];
-                    rand_lc += &(point.pow(&[is as u64]) * rand_single);
+                    rand_lc += &(point.pow(&[is as u64]) * &rand_single);
                 }
             }
 
