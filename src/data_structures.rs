@@ -8,7 +8,6 @@ use std::{
     fmt::Debug,
 };
 use rand_core::RngCore;
-use digest::Digest;
 
 /// Labels a `LabeledPolynomial` or a `LabeledCommitment`.
 pub type PolynomialLabel = String;
@@ -41,7 +40,7 @@ pub trait PCCommitterKey:
     fn supported_degree(&self) -> usize;
 
     /// Returns the hash of `self` instance.
-    fn get_hash<D: Digest>(&self) -> &[u8];
+    fn get_hash(&self) -> &[u8];
 }
 
 /// Defines the minimal interface of verifier keys for any polynomial
@@ -63,7 +62,7 @@ pub trait PCVerifierKey:
     fn supported_degree(&self) -> usize;
 
     /// Returns the hash of `self` instance.
-    fn get_hash<D: Digest>(&self) -> &[u8];
+    fn get_hash(&self) -> &[u8];
 }
 
 /// Defines the minimal interface of prepared verifier keys for any polynomial

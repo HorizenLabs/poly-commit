@@ -7,7 +7,6 @@ use std::{
     io::{ Read, Write }, vec, convert::TryFrom,
 };
 use rand_core::RngCore;
-use digest::Digest;
 
 /// `UniversalParams` are the universal parameters for the inner product arg scheme.
 #[derive(Derivative)]
@@ -84,7 +83,7 @@ impl<G: AffineCurve> PCCommitterKey for CommitterKey<G> {
         self.comm_key.len() - 1
     }
 
-    fn get_hash<D: Digest>(&self) -> &[u8] {
+    fn get_hash(&self) -> &[u8] {
         self.hash.as_slice()
     }
 }
@@ -101,7 +100,7 @@ impl<G: AffineCurve> PCVerifierKey for VerifierKey<G> {
         self.comm_key.len() - 1
     }
 
-    fn get_hash<D: Digest>(&self) -> &[u8] {
+    fn get_hash(&self) -> &[u8] {
         self.hash.as_slice()
     }
 }
