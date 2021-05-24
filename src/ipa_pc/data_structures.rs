@@ -7,6 +7,7 @@ use std::{
     io::{ Read, Write }, vec, convert::TryFrom,
 };
 use rand_core::RngCore;
+use digest::Digest;
 
 /// `UniversalParams` are the universal parameters for the inner product arg scheme.
 #[derive(Derivative)]
@@ -21,6 +22,9 @@ pub struct UniversalParams<G: AffineCurve> {
 
     /// Some group generator specifically used for hiding.
     pub s: G,
+
+    /// H(comm_key, h, s, max_degree)
+    pub hash: Vec<u8>
 }
 
 impl<G: AffineCurve> PCUniversalParams for UniversalParams<G> {
@@ -56,7 +60,7 @@ pub struct CommitterKey<G: AffineCurve> {
     /// this key was derived from.
     pub max_degree: usize,
 
-    /// The hash of all the previous fields
+    /// H(max_degree_comm_key, h, s, max_degree)
     pub hash: Vec<u8>,
 }
 
@@ -69,7 +73,6 @@ impl<G: AffineCurve> SemanticallyValid for CommitterKey<G> {
             self.h.is_valid() &&
             self.s.is_valid() &&
             PCCommitterKey::supported_degree(self) <= self.max_degree
-            //TODO: Add also check on the hash field
     }
 }
 
@@ -79,6 +82,10 @@ impl<G: AffineCurve> PCCommitterKey for CommitterKey<G> {
     }
     fn supported_degree(&self) -> usize {
         self.comm_key.len() - 1
+    }
+
+    fn get_hash<D: Digest>(&self) -> &[u8] {
+        self.hash.as_slice()
     }
 }
 
@@ -92,6 +99,10 @@ impl<G: AffineCurve> PCVerifierKey for VerifierKey<G> {
 
     fn supported_degree(&self) -> usize {
         self.comm_key.len() - 1
+    }
+
+    fn get_hash<D: Digest>(&self) -> &[u8] {
+        self.hash.as_slice()
     }
 }
 

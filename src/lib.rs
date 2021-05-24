@@ -577,7 +577,9 @@ pub mod tests {
     #[derive(Copy, Clone, Default)]
     struct TestInfo {
         num_iters: usize,
+        /// Max segment size
         max_degree: Option<usize>,
+        /// Segment size
         supported_degree: Option<usize>,
         num_polynomials: usize,
         enforce_degree_bounds: bool,
@@ -737,7 +739,7 @@ pub mod tests {
                 let label = format!("Test{}", i);
                 labels.push(label.clone());
 
-                // sample polynomial of random degree 
+                // sample polynomial of random degree
                 let degree;
                 if segmented {
                     // sample degree from 5*`supported_degree` up to `seg_mul`*`supported_degree`
@@ -755,6 +757,7 @@ pub mod tests {
                     }
                 }
                 let poly = Polynomial::rand(degree, rng);
+                println!("Poly {} degree: {}", i, degree);
 
                 // If specified, we sample any degree bound larger than the degree of the
                 // polynomial.        
@@ -842,6 +845,7 @@ pub mod tests {
 
             test_canonical_serialize_deserialize(true, &proof);
 
+            // Assert success using the same key
             let mut fs_rng = PC::RandomOracle::new();
             let result = PC::batch_check(
                 &vk,
@@ -862,6 +866,42 @@ pub mod tests {
                 }
             }
             assert!(result, "proof was incorrect, Query set: {:#?}", query_set);
+
+            // Assert success using a bigger key
+            let bigger_degree = max_degree * 2;
+            let pp = PC::setup(bigger_degree)?;
+            let (_, vk) = PC::trim(
+                &pp,
+                bigger_degree,
+            )?;
+
+            let mut fs_rng = PC::RandomOracle::new();
+            assert!(PC::batch_check(
+                &vk,
+                &comms,
+                &query_set,
+                &values,
+                &proof,
+                &mut fs_rng
+            )?);
+
+            // Assert failure using a smaller key
+            let smaller_degree = supported_degree/2;
+            let pp = PC::setup(smaller_degree)?;
+            let (_, vk) = PC::trim(
+                &pp,
+                smaller_degree,
+            )?;
+
+            let mut fs_rng = PC::RandomOracle::new();
+            assert!(!PC::batch_check(
+                &vk,
+                &comms,
+                &query_set,
+                &values,
+                &proof,
+                &mut fs_rng
+            )?);
         }
         Ok(())
     }

@@ -3,7 +3,7 @@ use crate::{Error, Evaluations, QuerySet};
 use crate::{LabeledCommitment, LabeledPolynomial, LabeledRandomness};
 use crate::{PCRandomness, PCUniversalParams, Polynomial, PolynomialCommitment};
 use algebra::msm::VariableBaseMSM;
-use algebra::{ToBytes, to_bytes, Field, PrimeField, UniformRand, Group, AffineCurve, ProjectiveCurve};
+use algebra::{SemanticallyValid, ToBytes, to_bytes, Field, PrimeField, UniformRand, Group, AffineCurve, ProjectiveCurve};
 use std::{format, vec};
 use std::marker::PhantomData;
 use rand_core::RngCore;
@@ -64,6 +64,13 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     #[inline]
     fn inner_product(l: &[G::ScalarField], r: &[G::ScalarField]) -> G::ScalarField {
         l.par_iter().zip(r).map(|(li, ri)| *li * ri).sum()
+    }
+
+    /// Complete semantic checks on `ck`.
+    #[inline]
+    pub fn check_key(ck: &CommitterKey<G>) -> bool {
+        ck.is_valid() &&
+            &D::digest(&to_bytes![&ck.comm_key, &ck.h, &ck.s, ck.max_degree as u32].unwrap()).to_vec() == &ck.hash
     }
 
     /// Computes an opening proof of multiple check polynomials with a corresponding
@@ -652,17 +659,16 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let max_degree = (max_degree + 1).next_power_of_two() - 1;
 
         let setup_time = start_timer!(|| format!("Sampling {} generators", max_degree + 3));
-        let mut generators = Self::sample_generators(max_degree + 3);
+        let generators = Self::sample_generators(max_degree + 3);
         end_timer!(setup_time);
 
-        let h = generators.pop().unwrap();
-        let s = generators.pop().unwrap();
+        let hash = D::digest(&to_bytes![&generators, max_degree as u32].unwrap()).to_vec();
 
-        let pp = UniversalParams {
-            comm_key: generators,
-            h,
-            s,
-        };
+        let h = generators[0].clone();
+        let s = generators[1].clone();
+        let comm_key = generators[2..].to_vec();
+
+        let pp = UniversalParams { comm_key, h, s, hash };
 
         Ok(pp)
     }
@@ -682,19 +688,12 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let trim_time =
             start_timer!(|| format!("Trimming to supported degree of {}", supported_degree));
 
-        let hash = D::digest(&to_bytes![
-            &pp.comm_key[0..(supported_degree + 1)],
-            pp.h.clone(),
-            pp.s.clone(),
-            pp.max_degree() as u32
-        ].unwrap()).to_vec();
-
         let ck = CommitterKey {
             comm_key: pp.comm_key[0..(supported_degree + 1)].to_vec(),
             h: pp.h.clone(),
             s: pp.s.clone(),
             max_degree: pp.max_degree(),
-            hash: hash.clone(),
+            hash: pp.hash.clone(),
         };
 
         let vk = VerifierKey {
@@ -702,7 +701,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             h: pp.h.clone(),
             s: pp.s.clone(),
             max_degree: pp.max_degree(),
-            hash: hash.clone(),
+            hash: pp.hash.clone(),
         };
 
         end_timer!(trim_time);
