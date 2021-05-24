@@ -68,9 +68,9 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
     /// Complete semantic checks on `ck`.
     #[inline]
-    pub fn check_key(ck: &CommitterKey<G>) -> bool {
-        ck.is_valid() &&
-            &D::digest(&to_bytes![&ck.comm_key, &ck.h, &ck.s, ck.max_degree as u32].unwrap()).to_vec() == &ck.hash
+    pub fn check_key(ck: &CommitterKey<G>, max_degree: usize) -> bool {
+        let pp = <Self as PolynomialCommitment<G::ScalarField>>::setup(max_degree).unwrap();
+        ck.is_valid() && &pp.hash == &ck.hash
     }
 
     /// Computes an opening proof of multiple check polynomials with a corresponding
@@ -1369,10 +1369,15 @@ mod tests {
 
     use super::InnerProductArgPC;
 
-    use algebra::curves::tweedle::dee::{
-        Affine, Projective,
+    use algebra::{
+        curves::tweedle::dee::{
+            Affine, Projective,
+        },
+        ToBytes, to_bytes
     };
+    use digest::Digest;
     use blake2::Blake2s;
+    use crate::{PolynomialCommitment, PCCommitterKey};
 
     type PC<E, D> = InnerProductArgPC<E, D>;
     type PC_DEE = PC<Affine, Blake2s>;
@@ -1481,6 +1486,22 @@ mod tests {
         use crate::tests::*;
         bad_degree_bound_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
+    }
+
+    #[test]
+    fn key_hash_test() {
+        let max_degree = 1 << 7;
+        let supported_degree = 1 << 5;
+
+        let pp = PC_DEE::setup(max_degree).unwrap();
+        let (ck, _) = PC_DEE::trim(&pp, supported_degree).unwrap();
+
+        assert!(PC_DEE::check_key(&ck, max_degree));
+        assert!(!PC_DEE::check_key(&ck, supported_degree));
+        assert!(ck.get_hash() == pp.hash.clone());
+
+        let h = Blake2s::digest(&to_bytes![&ck.comm_key, &ck.h, &ck.s, ck.max_degree as u32].unwrap()).to_vec();
+        assert_ne!(h.as_slice(), ck.get_hash());
     }
 
     #[test]
