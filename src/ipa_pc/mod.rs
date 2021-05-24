@@ -1377,7 +1377,7 @@ mod tests {
     };
     use digest::Digest;
     use blake2::Blake2s;
-    use crate::{PolynomialCommitment, PCCommitterKey};
+    use crate::{PolynomialCommitment, PCCommitterKey, PCUniversalParams};
 
     type PC<E, D> = InnerProductArgPC<E, D>;
     type PC_DEE = PC<Affine, Blake2s>;
@@ -1498,7 +1498,7 @@ mod tests {
 
         assert!(PC_DEE::check_key(&ck, max_degree));
         assert!(!PC_DEE::check_key(&ck, supported_degree));
-        assert!(ck.get_hash() == pp.hash.clone());
+        assert!(ck.get_hash() == pp.get_hash());
 
         let h = Blake2s::digest(&to_bytes![&ck.comm_key, &ck.h, &ck.s, ck.max_degree as u32].unwrap()).to_vec();
         assert_ne!(h.as_slice(), ck.get_hash());

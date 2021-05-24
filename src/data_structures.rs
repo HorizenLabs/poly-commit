@@ -19,6 +19,9 @@ pub trait PCUniversalParams:
 {
     /// Outputs the maximum degree supported by the committer key.
     fn max_degree(&self) -> usize;
+
+    /// Returns the hash of `self` instance.
+    fn get_hash(&self) -> &[u8];
 }
 
 /// Defines the minimal interface of committer keys for any polynomial

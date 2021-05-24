@@ -30,6 +30,7 @@ impl<G: AffineCurve> PCUniversalParams for UniversalParams<G> {
     fn max_degree(&self) -> usize {
         self.comm_key.len() - 1
     }
+    fn get_hash(&self) -> &[u8] { self.hash.as_slice() }
 }
 
 /// `CommitterKey` is used to commit to, and create evaluation proofs for, a given
