@@ -583,7 +583,8 @@ pub mod tests {
         enforce_degree_bounds: bool,
         max_num_queries: usize,
         num_equations: Option<usize>,
-        segmented: bool
+        segmented: bool,
+        is_negative: bool
     }
 
     pub fn bad_degree_bound_test<F, PC>() -> Result<(), PC::Error>
@@ -697,6 +698,7 @@ pub mod tests {
                 enforce_degree_bounds,
                 max_num_queries,
                 segmented,
+                is_negative,
                 ..
             } = info;
 
@@ -822,7 +824,11 @@ pub mod tests {
                 for (i, label) in labels.iter().enumerate() {
                     query_set.insert((label.clone(), (format!("{}", i), point)));
                     let value = polynomials[i].evaluate(point);
-                    values.insert((label.clone(), point), value);
+                    if is_negative {
+                        values.insert((label.clone(), point), F::rand(rng));
+                    } else {
+                        values.insert((label.clone(), point), value);
+                    }
                 }
             }
             println!("Generated query set");
@@ -1047,7 +1053,7 @@ pub mod tests {
         Ok(())
     }
 
-    pub fn constant_poly_test<F, PC>() -> Result<(), PC::Error>
+    pub fn constant_poly_test<F, PC>(is_negative: bool) -> Result<(), PC::Error>
         where
             F: Field,
             PC: PolynomialCommitment<F>,
@@ -1059,12 +1065,13 @@ pub mod tests {
             num_polynomials: 1,
             enforce_degree_bounds: false,
             max_num_queries: 1,
+            is_negative,
             ..Default::default()
         };
         test_template::<F, PC>(info)
     }
 
-    pub fn single_poly_test<F, PC>() -> Result<(), PC::Error>
+    pub fn single_poly_test<F, PC>(is_negative: bool) -> Result<(), PC::Error>
         where
             F: Field,
             PC: PolynomialCommitment<F>,
@@ -1076,12 +1083,13 @@ pub mod tests {
             num_polynomials: 1,
             enforce_degree_bounds: false,
             max_num_queries: 1,
+            is_negative,
             ..Default::default()
         };
         test_template::<F, PC>(info)
     }
 
-    pub fn linear_poly_degree_bound_test<F, PC>() -> Result<(), PC::Error>
+    pub fn linear_poly_degree_bound_test<F, PC>(is_negative: bool) -> Result<(), PC::Error>
         where
             F: Field,
             PC: PolynomialCommitment<F>,
@@ -1093,12 +1101,13 @@ pub mod tests {
             num_polynomials: 1,
             enforce_degree_bounds: true,
             max_num_queries: 1,
+            is_negative,
             ..Default::default()
         };
         test_template::<F, PC>(info)
     }
 
-    pub fn single_poly_degree_bound_test<F, PC>() -> Result<(), PC::Error>
+    pub fn single_poly_degree_bound_test<F, PC>(is_negative: bool) -> Result<(), PC::Error>
         where
             F: Field,
             PC: PolynomialCommitment<F>,
@@ -1110,12 +1119,13 @@ pub mod tests {
             num_polynomials: 1,
             enforce_degree_bounds: true,
             max_num_queries: 1,
+            is_negative,
             ..Default::default()
         };
         test_template::<F, PC>(info)
     }
 
-    pub fn quadratic_poly_degree_bound_multiple_queries_test<F, PC>() -> Result<(), PC::Error>
+    pub fn quadratic_poly_degree_bound_multiple_queries_test<F, PC>(is_negative: bool) -> Result<(), PC::Error>
         where
             F: Field,
             PC: PolynomialCommitment<F>,
@@ -1127,12 +1137,13 @@ pub mod tests {
             num_polynomials: 1,
             enforce_degree_bounds: true,
             max_num_queries: 2,
+            is_negative,
             ..Default::default()
         };
         test_template::<F, PC>(info)
     }
 
-    pub fn two_poly_four_points_test<F, PC>() -> Result<(), PC::Error>
+    pub fn two_poly_four_points_test<F, PC>(is_negative: bool) -> Result<(), PC::Error>
     where
         F: Field,
         PC: PolynomialCommitment<F>,
@@ -1144,12 +1155,13 @@ pub mod tests {
             num_polynomials: 2,
             enforce_degree_bounds: true,
             max_num_queries: 4,
+            is_negative,
             ..Default::default()
         };
         test_template::<F, PC>(info)
     }
 
-    pub fn single_poly_degree_bound_multiple_queries_test<F, PC>() -> Result<(), PC::Error>
+    pub fn single_poly_degree_bound_multiple_queries_test<F, PC>(is_negative: bool) -> Result<(), PC::Error>
         where
             F: Field,
             PC: PolynomialCommitment<F>,
@@ -1161,12 +1173,13 @@ pub mod tests {
             num_polynomials: 1,
             enforce_degree_bounds: true,
             max_num_queries: 2,
+            is_negative,
             ..Default::default()
         };
         test_template::<F, PC>(info)
     }
 
-    pub fn two_polys_degree_bound_single_query_test<F, PC>() -> Result<(), PC::Error>
+    pub fn two_polys_degree_bound_single_query_test<F, PC>(is_negative: bool) -> Result<(), PC::Error>
         where
             F: Field,
             PC: PolynomialCommitment<F>,
@@ -1178,12 +1191,13 @@ pub mod tests {
             num_polynomials: 2,
             enforce_degree_bounds: true,
             max_num_queries: 1,
+            is_negative,
             ..Default::default()
         };
         test_template::<F, PC>(info)
     }
 
-    pub fn full_end_to_end_test<F, PC>() -> Result<(), PC::Error>
+    pub fn full_end_to_end_test<F, PC>(is_negative: bool) -> Result<(), PC::Error>
         where
             F: Field,
             PC: PolynomialCommitment<F>,
@@ -1195,12 +1209,13 @@ pub mod tests {
             num_polynomials: 10,
             enforce_degree_bounds: true,
             max_num_queries: 5,
+            is_negative,
             ..Default::default()
         };
         test_template::<F, PC>(info)
     }
 
-    pub fn segmented_test<F, PC>() -> Result<(), PC::Error>
+    pub fn segmented_test<F, PC>(is_negative: bool) -> Result<(), PC::Error>
         where
             F: Field,
             PC: PolynomialCommitment<F>,
@@ -1213,12 +1228,13 @@ pub mod tests {
             enforce_degree_bounds: true,
             max_num_queries: 5,
             segmented: true,
+            is_negative,
             ..Default::default()
         };
         test_template::<F, PC>(info)
     }
 
-    pub fn full_end_to_end_equation_test<F, PC>() -> Result<(), PC::Error>
+    pub fn full_end_to_end_equation_test<F, PC>(is_negative: bool) -> Result<(), PC::Error>
         where
             F: Field,
             PC: PolynomialCommitment<F>,
@@ -1232,11 +1248,13 @@ pub mod tests {
             max_num_queries: 5,
             num_equations: Some(10),
             segmented: false,
+            is_negative,
+            ..Default::default()
         };
         equation_test_template::<F, PC>(info)
     }
 
-    pub fn single_equation_test<F, PC>() -> Result<(), PC::Error>
+    pub fn single_equation_test<F, PC>(is_negative: bool) -> Result<(), PC::Error>
         where
             F: Field,
             PC: PolynomialCommitment<F>,
@@ -1250,11 +1268,13 @@ pub mod tests {
             max_num_queries: 1,
             num_equations: Some(1),
             segmented: false,
+            is_negative,
+            ..Default::default()
         };
         equation_test_template::<F, PC>(info)
     }
 
-    pub fn two_equation_test<F, PC>() -> Result<(), PC::Error>
+    pub fn two_equation_test<F, PC>(is_negative: bool) -> Result<(), PC::Error>
         where
             F: Field,
             PC: PolynomialCommitment<F>,
@@ -1268,11 +1288,13 @@ pub mod tests {
             max_num_queries: 1,
             num_equations: Some(2),
             segmented: false,
+            is_negative,
+            ..Default::default()
         };
         equation_test_template::<F, PC>(info)
     }
 
-    pub fn two_equation_degree_bound_test<F, PC>() -> Result<(), PC::Error>
+    pub fn two_equation_degree_bound_test<F, PC>(is_negative: bool) -> Result<(), PC::Error>
         where
             F: Field,
             PC: PolynomialCommitment<F>,
@@ -1286,6 +1308,8 @@ pub mod tests {
             max_num_queries: 1,
             num_equations: Some(2),
             segmented: false,
+            is_negative,
+            ..Default::default()
         };
         equation_test_template::<F, PC>(info)
     }
