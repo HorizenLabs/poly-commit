@@ -583,15 +583,15 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
     /// Computing the base point vector of the commmitment scheme in a 
     /// deterministic manner, given the PROTOCOL_NAME.
-    fn sample_generators(num_generators: usize) -> Vec<G> {
+    fn sample_generators(num_generators: usize, seed: &[u8]) -> Vec<G> {
         let generators: Vec<_> = (0..num_generators).into_par_iter()
             .map(|i| {
                 let i = i as u64;
-                let mut hash = D::digest(&to_bytes![&Self::PROTOCOL_NAME, i].unwrap());
+                let mut hash = D::digest(&to_bytes![seed, i].unwrap());
                 let mut g = G::from_random_bytes(&hash);
                 let mut j = 0u64;
                 while g.is_none() {
-                    hash = D::digest(&to_bytes![&Self::PROTOCOL_NAME, i, j].unwrap());
+                    hash = D::digest(&to_bytes![seed, i, j].unwrap());
                     g = G::from_random_bytes(&hash);
                     j += 1;
                 }
@@ -648,11 +648,20 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
     fn setup(
         max_degree: usize,
     ) -> Result<Self::UniversalParams, Self::Error> {
+        Self::setup_from_seed(max_degree, &Self::PROTOCOL_NAME)
+    }
+
+    /// Setup of the base point vector (deterministically derived from the
+    /// given byte array as seed).
+    fn setup_from_seed(
+        max_degree: usize,
+        seed: &[u8],
+    ) -> Result<Self::UniversalParams, Self::Error> {
         // Ensure that max_degree + 1 is a power of 2
         let max_degree = (max_degree + 1).next_power_of_two() - 1;
 
         let setup_time = start_timer!(|| format!("Sampling {} generators", max_degree + 3));
-        let mut generators = Self::sample_generators(max_degree + 3);
+        let mut generators = Self::sample_generators(max_degree + 3, seed);
         end_timer!(setup_time);
 
         let h = generators.pop().unwrap();
@@ -666,6 +675,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
         Ok(pp)
     }
+
 
     /// Trims the base point vector of the setup function to a custom segment size
     fn trim(

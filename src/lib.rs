@@ -116,7 +116,14 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         max_degree: usize,
     ) -> Result<Self::UniversalParams, Self::Error>;
 
-    /// Specializes the public parameters for polynomials up to the given `supported_degree`
+    /// Constructs public parameters when given as input the maximum degree `degree`
+    /// for the polynomial commitment scheme from given seed
+    fn setup_from_seed(
+        max_degree: usize,
+        seed: &[u8],
+    ) -> Result<Self::UniversalParams, Self::Error>;
+
+        /// Specializes the public parameters for polynomials up to the given `supported_degree`
     /// and for enforcing degree bounds in the range `1..=supported_degree`.
     fn trim(
         pp: &Self::UniversalParams,
