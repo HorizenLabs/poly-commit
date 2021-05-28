@@ -3,7 +3,7 @@ use crate::{Error, Evaluations, QuerySet};
 use crate::{LabeledCommitment, LabeledPolynomial, LabeledRandomness};
 use crate::{PCRandomness, PCUniversalParams, Polynomial, PolynomialCommitment};
 use algebra::msm::VariableBaseMSM;
-use algebra::{ToBytes, to_bytes, Field, PrimeField, UniformRand, Group, AffineCurve, ProjectiveCurve};
+use algebra::{SemanticallyValid, ToBytes, to_bytes, Field, PrimeField, UniformRand, Group, AffineCurve, ProjectiveCurve};
 use std::{format, vec};
 use std::marker::PhantomData;
 use rand_core::RngCore;
@@ -64,6 +64,13 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     #[inline]
     fn inner_product(l: &[G::ScalarField], r: &[G::ScalarField]) -> G::ScalarField {
         l.par_iter().zip(r).map(|(li, ri)| *li * ri).sum()
+    }
+
+    /// Complete semantic checks on `ck`.
+    #[inline]
+    pub fn check_key(ck: &CommitterKey<G>, max_degree: usize) -> bool {
+        let pp = <Self as PolynomialCommitment<G::ScalarField>>::setup(max_degree).unwrap();
+        ck.is_valid() && &pp.hash == &ck.hash
     }
 
     /// Computes an opening proof of multiple check polynomials with a corresponding
@@ -361,6 +368,19 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     {
         let commitments: Vec<&'a LabeledCommitment<Commitment<G>>> = commitments.into_iter().map(|comm| comm).collect();
 
+        let mut labels: Vec<_> = commitments
+            .iter()
+            .map(|c| c.label())
+            .collect();
+
+        labels.sort_by(|a, b| a.cmp(&b));
+
+        let labels: BTreeMap<_, _> = labels
+            .iter()
+            .enumerate()
+            .map(|(i, &item)| (item, i))
+            .collect();
+
         let batch_check_time = start_timer!(|| "Multi poly multi point batch check: succinct part");
         let evals_time = start_timer!(|| "Compute batched poly value");
 
@@ -380,13 +400,17 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
                 .ok_or(Error::MissingEvaluation {
                     label: label.to_string(),
                 })?;
-            let v_i = batch_proof.batch_values
-                .get(&label.clone())
-                .ok_or(Error::MissingEvaluation {
-                    label: label.to_string(),
-                })?;
-            v_values.push(*v_i);
             y_values.push(*y_i);
+
+            let v_i = batch_proof.batch_values[
+                *labels
+                    .get(&label.clone())
+                    .ok_or(Error::MissingEvaluation {
+                        label: label.to_string(),
+                    })?
+            ];
+            v_values.push(v_i);
+
             points.push(point);
         }
 
@@ -411,13 +435,15 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         }
 
         let mut batch_values = vec![];
-        for commitment in commitments.iter() {
-            let value = batch_proof.batch_values
-                .get(commitment.label())
-                .ok_or(Error::MissingEvaluation {
-                    label: commitment.label().to_string(),
-                })?;
-            batch_values.push(*value);
+        for labeled_commitment in commitments.iter() {
+            batch_values.push(batch_proof.batch_values[
+                *labels
+                    .get(labeled_commitment.label())
+                    .ok_or(Error::MissingEvaluation {
+                        label: labeled_commitment.label().to_string(),
+                    })?
+                ]
+            );
         }
 
         // Reconstructed v value added to the check
@@ -437,7 +463,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
         let check_time = start_timer!(|| "Succinct check batched polynomial");
 
-        fs_rng.absorb(&to_bytes![batch_proof.batch_values.values().collect::<Vec<&G::ScalarField>>()].unwrap());
+        fs_rng.absorb(&to_bytes![batch_proof.batch_values].unwrap());
 
         let check_poly = Self::succinct_check(vk, commitments, point, batch_values, proof, fs_rng)?;
 
@@ -652,17 +678,16 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let max_degree = (max_degree + 1).next_power_of_two() - 1;
 
         let setup_time = start_timer!(|| format!("Sampling {} generators", max_degree + 3));
-        let mut generators = Self::sample_generators(max_degree + 3);
+        let generators = Self::sample_generators(max_degree + 3);
         end_timer!(setup_time);
 
-        let h = generators.pop().unwrap();
-        let s = generators.pop().unwrap();
+        let hash = D::digest(&to_bytes![&generators, max_degree as u32].unwrap()).to_vec();
 
-        let pp = UniversalParams {
-            comm_key: generators,
-            h,
-            s,
-        };
+        let h = generators[0].clone();
+        let s = generators[1].clone();
+        let comm_key = generators[2..].to_vec();
+
+        let pp = UniversalParams { comm_key, h, s, hash };
 
         Ok(pp)
     }
@@ -682,19 +707,12 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let trim_time =
             start_timer!(|| format!("Trimming to supported degree of {}", supported_degree));
 
-        let hash = D::digest(&to_bytes![
-            &pp.comm_key[0..(supported_degree + 1)],
-            pp.h.clone(),
-            pp.s.clone(),
-            pp.max_degree() as u32
-        ].unwrap()).to_vec();
-
         let ck = CommitterKey {
             comm_key: pp.comm_key[0..(supported_degree + 1)].to_vec(),
             h: pp.h.clone(),
             s: pp.s.clone(),
             max_degree: pp.max_degree(),
-            hash: hash.clone(),
+            hash: pp.hash.clone(),
         };
 
         let vk = VerifierKey {
@@ -702,7 +720,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             h: pp.h.clone(),
             s: pp.s.clone(),
             max_degree: pp.max_degree(),
-            hash: hash.clone(),
+            hash: pp.hash.clone(),
         };
 
         end_timer!(trim_time);
@@ -1124,6 +1142,19 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let commitments: Vec<&'a LabeledCommitment<Self::Commitment>> = commitments.into_iter().map(|comm| comm).collect();
         let rands: Vec<&'a LabeledRandomness<Self::Randomness>> = rands.into_iter().map(|rand| rand).collect();
 
+        let mut labels: Vec<_> = labeled_polynomials
+            .iter()
+            .map(|c| c.label())
+            .collect();
+
+        labels.sort_by(|a, b| a.cmp(&b));
+
+        let labels: BTreeMap<_, _> = labels
+            .iter()
+            .enumerate()
+            .map(|(i, &item)| (item, i))
+            .collect();
+
         let batch_time = start_timer!(|| "Multi poly multi point batching.");
 
         // as the statement of the opening proof is already bound to the interal state of the fs_rng,
@@ -1224,10 +1255,16 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let point: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
         // Values: v_i = p_i(x), where x is fresh random challenge
-        let batch_values: BTreeMap<_, _> = labeled_polynomials
-            .iter()
-            .map(|labeled_polynomial| (labeled_polynomial.label().clone(), labeled_polynomial.polynomial().evaluate(point)))
-            .collect();
+        let mut batch_values = vec![G::ScalarField::zero(); labeled_polynomials.len()];
+        for labeled_polynomial in labeled_polynomials.iter() {
+            batch_values[
+                *labels
+                    .get(labeled_polynomial.label())
+                    .ok_or(Error::MissingEvaluation {
+                        label: labeled_polynomial.label().to_string(),
+                    })?
+            ] = labeled_polynomial.polynomial().evaluate(point);
+        }
 
         // h(X) polynomial added to the set of polynomials for multi-poly single-point batching
         let mut labeled_polynomials = labeled_polynomials;
@@ -1255,7 +1292,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         // absorb the evaluations at the new challenge x
         // The value of `batch_commitment` is determined by these and the initial 
         // opening claims
-        fs_rng.absorb(&to_bytes![batch_values.values().collect::<Vec<&G::ScalarField>>()].unwrap());
+        fs_rng.absorb(&to_bytes![batch_values].unwrap());
 
         let proof = Self::open_individual_opening_challenges(
             ck,
@@ -1370,10 +1407,15 @@ mod tests {
 
     use super::InnerProductArgPC;
 
-    use algebra::curves::tweedle::dee::{
-        Affine, Projective,
+    use algebra::{
+        curves::tweedle::dee::{
+            Affine, Projective,
+        },
+        ToBytes, to_bytes
     };
+    use digest::Digest;
     use blake2::Blake2s;
+    use crate::{PolynomialCommitment, PCCommitterKey, PCUniversalParams};
 
     type PC<E, D> = InnerProductArgPC<E, D>;
     type PC_DEE = PC<Affine, Blake2s>;
@@ -1482,6 +1524,22 @@ mod tests {
         use crate::tests::*;
         bad_degree_bound_test::<_, PC_DEE>().expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
+    }
+
+    #[test]
+    fn key_hash_test() {
+        let max_degree = 1 << 7;
+        let supported_degree = 1 << 5;
+
+        let pp = PC_DEE::setup(max_degree).unwrap();
+        let (ck, _) = PC_DEE::trim(&pp, supported_degree).unwrap();
+
+        assert!(PC_DEE::check_key(&ck, max_degree));
+        assert!(!PC_DEE::check_key(&ck, supported_degree));
+        assert!(ck.get_hash() == pp.get_hash());
+
+        let h = Blake2s::digest(&to_bytes![&ck.comm_key, &ck.h, &ck.s, ck.max_degree as u32].unwrap()).to_vec();
+        assert_ne!(h.as_slice(), ck.get_hash());
     }
 
     #[test]

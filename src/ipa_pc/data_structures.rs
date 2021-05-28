@@ -21,12 +21,16 @@ pub struct UniversalParams<G: AffineCurve> {
 
     /// Some group generator specifically used for hiding.
     pub s: G,
+
+    /// H(comm_key, h, s, max_degree)
+    pub hash: Vec<u8>
 }
 
 impl<G: AffineCurve> PCUniversalParams for UniversalParams<G> {
     fn max_degree(&self) -> usize {
         self.comm_key.len() - 1
     }
+    fn get_hash(&self) -> &[u8] { self.hash.as_slice() }
 }
 
 /// `CommitterKey` is used to commit to, and create evaluation proofs for, a given
@@ -56,7 +60,7 @@ pub struct CommitterKey<G: AffineCurve> {
     /// this key was derived from.
     pub max_degree: usize,
 
-    /// The hash of all the previous fields
+    /// H(max_degree_comm_key, h, s, max_degree)
     pub hash: Vec<u8>,
 }
 
@@ -69,7 +73,6 @@ impl<G: AffineCurve> SemanticallyValid for CommitterKey<G> {
             self.h.is_valid() &&
             self.s.is_valid() &&
             PCCommitterKey::supported_degree(self) <= self.max_degree
-            //TODO: Add also check on the hash field
     }
 }
 
@@ -79,6 +82,10 @@ impl<G: AffineCurve> PCCommitterKey for CommitterKey<G> {
     }
     fn supported_degree(&self) -> usize {
         self.comm_key.len() - 1
+    }
+
+    fn get_hash(&self) -> &[u8] {
+        self.hash.as_slice()
     }
 }
 
@@ -92,6 +99,10 @@ impl<G: AffineCurve> PCVerifierKey for VerifierKey<G> {
 
     fn supported_degree(&self) -> usize {
         self.comm_key.len() - 1
+    }
+
+    fn get_hash(&self) -> &[u8] {
+        self.hash.as_slice()
     }
 }
 
@@ -392,14 +403,14 @@ pub struct BatchProof<G: AffineCurve> {
     pub batch_commitment: Vec<G>,
 
     /// Values: v_i = p(x_i), where the query points x_i are not necessarily distinct.
-    pub batch_values: BTreeMap<String, G::ScalarField>
+    pub batch_values: Vec<G::ScalarField>
 }
 
 impl<G: AffineCurve> SemanticallyValid for BatchProof<G> {
     fn is_valid(&self) -> bool {
         self.proof.is_valid() &&
             self.batch_commitment.is_valid() &&
-            self.batch_values.iter().all(|(_, v)| v.is_valid())
+            self.batch_values.iter().all(|v| v.is_valid())
     }
 }
 
@@ -424,8 +435,7 @@ impl<G: AffineCurve> CanonicalSerialize for BatchProof<G> {
         // More than enough for practical applications
         let batch_values_len = u8::try_from(self.batch_values.len()).map_err(|_| SerializationError::NotEnoughSpace)?;
         CanonicalSerialize::serialize(&batch_values_len, &mut writer)?;
-        for (k, v) in self.batch_values.iter() {
-            CanonicalSerialize::serialize(k, &mut writer)?;
+        for v in self.batch_values.iter() {
             CanonicalSerialize::serialize(v, &mut writer)?;
         }
 
@@ -435,7 +445,7 @@ impl<G: AffineCurve> CanonicalSerialize for BatchProof<G> {
     fn serialized_size(&self) -> usize {
         self.proof.serialized_size()
             + 1 + (self.batch_commitment.len() * self.batch_commitment[0].serialized_size())
-            + 1 + self.batch_values.iter().map(|(k, v)| k.serialized_size() + v.serialized_size()).sum::<usize>()
+            + 1 + self.batch_values.iter().map(|v| v.serialized_size()).sum::<usize>()
     }
 }
 
@@ -455,11 +465,10 @@ impl<G: AffineCurve> CanonicalDeserialize for BatchProof<G> {
 
         // Read batch values
         let batch_values_len: u8 = CanonicalDeserialize::deserialize(&mut reader)?;
-        let mut batch_values = BTreeMap::new();
+        let mut batch_values = vec![];
         for _ in 0..(batch_values_len as usize) {
-            let k: String = CanonicalDeserialize::deserialize(&mut reader)?;
             let v: G::ScalarField = CanonicalDeserialize::deserialize(&mut reader)?;
-            batch_values.insert(k, v);
+            batch_values.push(v);
         }
 
         Ok(Self { proof, batch_commitment, batch_values })
@@ -472,7 +481,7 @@ impl<G: AffineCurve> CanonicalDeserialize for BatchProof<G> {
 /// This polynomial has the special property that it has a succinct description
 /// and can be evaluated in `O(log(degree))` time, and the final committer key
 /// G_final can be computed via MSM from the its coefficients.
-#[derive(Clone, Debug, Eq, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SuccinctCheckPolynomial<F: PrimeField>(pub Vec<F>);
 
 impl<F: PrimeField> SuccinctCheckPolynomial<F> {
@@ -517,5 +526,41 @@ impl<F: PrimeField> SuccinctCheckPolynomial<F> {
         }
 
         product
+    }
+}
+
+impl<F: PrimeField> CanonicalSerialize for SuccinctCheckPolynomial<F> {
+
+    #[inline]
+    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        let len = self.0.len() as u8;
+        CanonicalSerialize::serialize(&len, &mut writer)?;
+        for item in self.0.iter() {
+            // Each field element is, in reality, only 128 bits long
+            let fe128 = item.into_repr().as_ref()[0] as u128 +
+                ((item.into_repr().as_ref()[1] as u128) << 64);
+            CanonicalSerialize::serialize(&fe128, &mut writer)?;
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn serialized_size(&self) -> usize {
+        1 + self.0.len() * 16
+    }
+}
+
+impl<F: PrimeField> CanonicalDeserialize for SuccinctCheckPolynomial<F> {
+
+    #[inline]
+    fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let len = <u8 as CanonicalDeserialize>::deserialize(&mut reader)?;
+        let mut values = Vec::new();
+        for _ in 0..len {
+            // Each field element is, in reality, only 128 bits long
+            let fe128 = u128::deserialize(&mut reader)?;
+            values.push(fe128.into());
+        }
+        Ok(SuccinctCheckPolynomial(values))
     }
 }
