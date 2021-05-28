@@ -1,5 +1,5 @@
 use crate::{Rc, String, Vec};
-use algebra::{Field, serialize::{CanonicalSerialize, CanonicalDeserialize, SerializationError}, SemanticallyValid};
+use algebra::{ToBytes, Field, serialize::{CanonicalSerialize, CanonicalDeserialize, SerializationError}, SemanticallyValid};
 pub use algebra::DensePolynomial as Polynomial;
 use std::{
     io::{Read, Write, Error as IoError, ErrorKind, Result as IoResult},
@@ -81,7 +81,7 @@ pub trait PCCommitment:
     Clone
     + CanonicalSerialize
     + CanonicalDeserialize
-    + algebra::ToBytes
+    + ToBytes
     + SemanticallyValid
 {
     /// Outputs a non-hiding commitment to the zero polynomial.
@@ -217,7 +217,7 @@ impl<C: PCCommitment> SemanticallyValid for LabeledCommitment<C> {
     }
 }
 
-impl<C: PCCommitment> algebra::ToBytes for LabeledCommitment<C> {
+impl<C: PCCommitment> ToBytes for LabeledCommitment<C> {
     #[inline]
     fn write<W: Write>(&self, writer: W) -> IoResult<()> {
 
