@@ -80,6 +80,9 @@ pub trait PCCommitment:
 
     /// Does this commitment have a degree bound?
     fn has_degree_bound(&self) -> bool;
+
+    /// Randomize commiment values for testing purpose
+    fn randomize(&mut self);
 }
 
 /// Defines the minimal interface of prepared commitments for any polynomial

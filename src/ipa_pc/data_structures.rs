@@ -1,12 +1,13 @@
 use crate::*;
 use crate::{PCCommitterKey, PCVerifierKey, Vec};
 use algebra::{
-    Field, UniformRand, AffineCurve, PrimeField, ToBytes,
+    Field, UniformRand, AffineCurve, ProjectiveCurve, PrimeField, ToBytes,
 };
 use std::{
     io::{ Read, Write }, vec, convert::TryFrom,
 };
 use rand_core::RngCore;
+use rand::thread_rng;
 
 /// `UniversalParams` are the universal parameters for the inner product arg scheme.
 #[derive(Derivative)]
@@ -175,6 +176,12 @@ impl<G: AffineCurve> PCCommitment for Commitment<G> {
 
     fn has_degree_bound(&self) -> bool {
         self.shifted_comm.is_some()
+    }
+
+    fn randomize(&mut self) {
+        let mut rng = thread_rng();
+        let comm_len = self.comm.len();
+        self.comm = (0..comm_len).map(|_| G::Projective::rand(&mut rng).into_affine()).collect::<Vec<_>>();
     }
 }
 
