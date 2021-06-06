@@ -687,7 +687,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
         let max_degree = (max_degree + 1).next_power_of_two() - 1;
 
         let setup_time = start_timer!(|| format!("Sampling {} generators", max_degree + 3));
-        let generators = Self::sample_generators(max_degree + 3);
+        let generators = Self::sample_generators(max_degree + 3, seed);
         end_timer!(setup_time);
 
         let hash = D::digest(&to_bytes![&generators, max_degree as u32].unwrap()).to_vec();
