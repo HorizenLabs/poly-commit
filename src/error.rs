@@ -104,6 +104,9 @@ pub enum Error {
 
     /// Failed succinct check
     FailedSuccinctCheck,
+
+    /// Incorrect proof
+    IncorrectProof,
 }
 
 impl std::fmt::Display for Error {
@@ -195,7 +198,8 @@ impl std::fmt::Display for Error {
             ),
             Error::IncorrectInputLength(err) => write!(f, "{}", err),
             Error::MalformedCommitment(err) => write!(f, "{}", err),
-            Error::FailedSuccinctCheck => write!(f, "Failed succinct check")
+            Error::FailedSuccinctCheck => write!(f, "Failed succinct check"),
+            Error::IncorrectProof => write!(f, "Incorrect proof"),
         }
     }
 }

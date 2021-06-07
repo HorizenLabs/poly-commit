@@ -88,6 +88,14 @@ impl<G: AffineCurve> PCCommitterKey for CommitterKey<G> {
     fn get_hash(&self) -> &[u8] {
         self.hash.as_slice()
     }
+
+    /// Randomize key for testing purpose
+    fn randomize(&mut self) {
+        let mut rng = thread_rng();
+        self.comm_key = self.comm_key.iter().map(|_| {
+            G::Projective::rand(&mut rng).into_affine()
+        }).collect::<Vec<_>>();
+    }
 }
 
 /// `VerifierKey` is used to check evaluation proofs for a given commitment.
@@ -104,6 +112,14 @@ impl<G: AffineCurve> PCVerifierKey for VerifierKey<G> {
 
     fn get_hash(&self) -> &[u8] {
         self.hash.as_slice()
+    }
+
+    /// Randomize key for testing purpose
+    fn randomize(&mut self) {
+        let mut rng = thread_rng();
+        self.comm_key = self.comm_key.iter().map(|_| {
+            G::Projective::rand(&mut rng).into_affine()
+        }).collect::<Vec<_>>();
     }
 }
 

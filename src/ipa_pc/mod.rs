@@ -1434,14 +1434,29 @@ mod tests {
     #[test]
     fn constant_poly_test() {
         use crate::tests::*;
-        constant_poly_test::<_, PC_DEE>(false).expect("test failed for tweedle_dee-blake2s");
+        constant_poly_test::<_, PC_DEE>(None).expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn constant_poly_negative_test() {
         use crate::tests::*;
-        match constant_poly_test::<_, PC_DEE>(true) {
+        match constant_poly_test::<_, PC_DEE>(Some(NegativeType::Values)) {
             Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match constant_poly_test::<_, PC_DEE>(Some(NegativeType::Commitments)) {
+            Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match constant_poly_test::<_, PC_DEE>(Some(NegativeType::CommitterKey)) {
+            Err(Error::IncorrectProof) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match constant_poly_test::<_, PC_DEE>(Some(NegativeType::VerifierKey)) {
+            Err(Error::IncorrectProof) => {},
             Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
             Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
         };
@@ -1450,14 +1465,29 @@ mod tests {
     #[test]
     fn single_poly_test() {
         use crate::tests::*;
-        single_poly_test::<_, PC_DEE>(false).expect("test failed for tweedle_dee-blake2s");
+        single_poly_test::<_, PC_DEE>(None).expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn single_poly_negative_test() {
         use crate::tests::*;
-        match single_poly_test::<_, PC_DEE>(true) {
+        match single_poly_test::<_, PC_DEE>(Some(NegativeType::Values)) {
             Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match single_poly_test::<_, PC_DEE>(Some(NegativeType::Commitments)) {
+            Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match single_poly_test::<_, PC_DEE>(Some(NegativeType::CommitterKey)) {
+            Err(Error::IncorrectProof) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match single_poly_test::<_, PC_DEE>(Some(NegativeType::VerifierKey)) {
+            Err(Error::IncorrectProof) => {},
             Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
             Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
         };
@@ -1466,15 +1496,30 @@ mod tests {
     #[test]
     fn quadratic_poly_degree_bound_multiple_queries_test() {
         use crate::tests::*;
-        quadratic_poly_degree_bound_multiple_queries_test::<_, PC_DEE>(false)
+        quadratic_poly_degree_bound_multiple_queries_test::<_, PC_DEE>(None)
             .expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn quadratic_poly_degree_bound_multiple_queries_negative_test() {
         use crate::tests::*;
-        match quadratic_poly_degree_bound_multiple_queries_test::<_, PC_DEE>(true) {
+        match quadratic_poly_degree_bound_multiple_queries_test::<_, PC_DEE>(Some(NegativeType::Values)) {
             Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match quadratic_poly_degree_bound_multiple_queries_test::<_, PC_DEE>(Some(NegativeType::Commitments)) {
+            Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match quadratic_poly_degree_bound_multiple_queries_test::<_, PC_DEE>(Some(NegativeType::CommitterKey)) {
+            Err(Error::IncorrectProof) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match quadratic_poly_degree_bound_multiple_queries_test::<_, PC_DEE>(Some(NegativeType::VerifierKey)) {
+            Err(Error::IncorrectProof) => {},
             Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
             Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
         };
@@ -1483,15 +1528,30 @@ mod tests {
     #[test]
     fn two_poly_four_points_test() {
         use crate::tests::*;
-        two_poly_four_points_test::<_, PC_DEE>(false)
+        two_poly_four_points_test::<_, PC_DEE>(None)
             .expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn two_poly_four_points_negative_test() {
         use crate::tests::*;
-        match two_poly_four_points_test::<_, PC_DEE>(true) {
+        match two_poly_four_points_test::<_, PC_DEE>(Some(NegativeType::Values)) {
             Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match two_poly_four_points_test::<_, PC_DEE>(Some(NegativeType::Commitments)) {
+            Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match two_poly_four_points_test::<_, PC_DEE>(Some(NegativeType::CommitterKey)) {
+            Err(Error::IncorrectProof) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match two_poly_four_points_test::<_, PC_DEE>(Some(NegativeType::VerifierKey)) {
+            Err(Error::IncorrectProof) => {},
             Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
             Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
         };
@@ -1500,15 +1560,30 @@ mod tests {
     #[test]
     fn linear_poly_degree_bound_test() {
         use crate::tests::*;
-        linear_poly_degree_bound_test::<_, PC_DEE>(false)
+        linear_poly_degree_bound_test::<_, PC_DEE>(None)
             .expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn linear_poly_degree_bound_negative_test() {
         use crate::tests::*;
-        match linear_poly_degree_bound_test::<_, PC_DEE>(true) {
+        match linear_poly_degree_bound_test::<_, PC_DEE>(Some(NegativeType::Values)) {
             Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match linear_poly_degree_bound_test::<_, PC_DEE>(Some(NegativeType::Commitments)) {
+            Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match linear_poly_degree_bound_test::<_, PC_DEE>(Some(NegativeType::CommitterKey)) {
+            Err(Error::IncorrectProof) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match linear_poly_degree_bound_test::<_, PC_DEE>(Some(NegativeType::VerifierKey)) {
+            Err(Error::IncorrectProof) => {},
             Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
             Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
         };
@@ -1517,15 +1592,30 @@ mod tests {
     #[test]
     fn single_poly_degree_bound_test() {
         use crate::tests::*;
-        single_poly_degree_bound_test::<_, PC_DEE>(false)
+        single_poly_degree_bound_test::<_, PC_DEE>(None)
             .expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn single_poly_degree_bound_negative_test() {
         use crate::tests::*;
-        match single_poly_degree_bound_test::<_, PC_DEE>(true) {
+        match single_poly_degree_bound_test::<_, PC_DEE>(Some(NegativeType::Values)) {
             Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match single_poly_degree_bound_test::<_, PC_DEE>(Some(NegativeType::Commitments)) {
+            Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match single_poly_degree_bound_test::<_, PC_DEE>(Some(NegativeType::CommitterKey)) {
+            Err(Error::IncorrectProof) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match single_poly_degree_bound_test::<_, PC_DEE>(Some(NegativeType::VerifierKey)) {
+            Err(Error::IncorrectProof) => {},
             Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
             Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
         };
@@ -1534,15 +1624,30 @@ mod tests {
     #[test]
     fn single_poly_degree_bound_multiple_queries_test() {
         use crate::tests::*;
-        single_poly_degree_bound_multiple_queries_test::<_, PC_DEE>(false)
+        single_poly_degree_bound_multiple_queries_test::<_, PC_DEE>(None)
             .expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn single_poly_degree_bound_multiple_queries_negative_test() {
         use crate::tests::*;
-        match single_poly_degree_bound_multiple_queries_test::<_, PC_DEE>(true) {
+        match single_poly_degree_bound_multiple_queries_test::<_, PC_DEE>(Some(NegativeType::Values)) {
             Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match single_poly_degree_bound_multiple_queries_test::<_, PC_DEE>(Some(NegativeType::Commitments)) {
+            Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match single_poly_degree_bound_multiple_queries_test::<_, PC_DEE>(Some(NegativeType::CommitterKey)) {
+            Err(Error::IncorrectProof) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match single_poly_degree_bound_multiple_queries_test::<_, PC_DEE>(Some(NegativeType::VerifierKey)) {
+            Err(Error::IncorrectProof) => {},
             Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
             Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
         };
@@ -1551,15 +1656,30 @@ mod tests {
     #[test]
     fn two_polys_degree_bound_single_query_test() {
         use crate::tests::*;
-        two_polys_degree_bound_single_query_test::<_, PC_DEE>(false)
+        two_polys_degree_bound_single_query_test::<_, PC_DEE>(None)
             .expect("test failed for tweedle_dee-blake2s");
     }
 
     #[test]
     fn two_polys_degree_bound_single_query_negative_test() {
         use crate::tests::*;
-        match two_polys_degree_bound_single_query_test::<_, PC_DEE>(true) {
+        match two_polys_degree_bound_single_query_test::<_, PC_DEE>(Some(NegativeType::Values)) {
             Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match two_polys_degree_bound_single_query_test::<_, PC_DEE>(Some(NegativeType::Commitments)) {
+            Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match two_polys_degree_bound_single_query_test::<_, PC_DEE>(Some(NegativeType::CommitterKey)) {
+            Err(Error::IncorrectProof) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match two_polys_degree_bound_single_query_test::<_, PC_DEE>(Some(NegativeType::VerifierKey)) {
+            Err(Error::IncorrectProof) => {},
             Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
             Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
         };
@@ -1568,15 +1688,30 @@ mod tests {
     #[test]
     fn full_end_to_end_test() {
         use crate::tests::*;
-        full_end_to_end_test::<_, PC_DEE>(false).expect("test failed for tweedle_dee-blake2s");
+        full_end_to_end_test::<_, PC_DEE>(None).expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
 
     #[test]
     fn full_end_to_end_negative_test() {
         use crate::tests::*;
-        match full_end_to_end_test::<_, PC_DEE>(true) {
+        match full_end_to_end_test::<_, PC_DEE>(Some(NegativeType::Values)) {
             Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match full_end_to_end_test::<_, PC_DEE>(Some(NegativeType::Commitments)) {
+            Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match full_end_to_end_test::<_, PC_DEE>(Some(NegativeType::CommitterKey)) {
+            Err(Error::IncorrectProof) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match full_end_to_end_test::<_, PC_DEE>(Some(NegativeType::VerifierKey)) {
+            Err(Error::IncorrectProof) => {},
             Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
             Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
         };
@@ -1586,15 +1721,30 @@ mod tests {
     #[test]
     fn segmented_test() {
         use crate::tests::*;
-        segmented_test::<_, PC_DEE>(false).expect("test failed for tweedle_dee-blake2s");
+        segmented_test::<_, PC_DEE>(None).expect("test failed for tweedle_dee-blake2s");
         println!("Finished tweedle_dee-blake2s");
     }
 
     #[test]
     fn segmented_negative_test() {
         use crate::tests::*;
-        match segmented_test::<_, PC_DEE>(true) {
+        match segmented_test::<_, PC_DEE>(Some(NegativeType::Values)) {
             Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match segmented_test::<_, PC_DEE>(Some(NegativeType::Commitments)) {
+            Err(Error::FailedSuccinctCheck) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match segmented_test::<_, PC_DEE>(Some(NegativeType::CommitterKey)) {
+            Err(Error::IncorrectProof) => {},
+            Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
+            Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
+        };
+        match segmented_test::<_, PC_DEE>(Some(NegativeType::VerifierKey)) {
+            Err(Error::IncorrectProof) => {},
             Ok(_) => { panic!("test should fail for tweedle_dee-blake2s") },
             Err(e) => { panic!("test failed for tweedle_dee-blake2s: {:?}", e) }
         };
