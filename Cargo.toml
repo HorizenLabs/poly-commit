@@ -20,8 +20,8 @@ license = "MIT/Apache-2.0"
 edition = "2018"
 
 [dependencies]
-algebra = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "development_tmp_fixes", features = ["parallel", "fft", "derive"] }
-bench-utils = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "development_tmp_fixes" }
+algebra = { git = "https://github.com/HorizenOfficial/ginger-lib", branch = "negative_tests", features = ["parallel", "fft", "derive"] }
+bench-utils = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "negative_tests" }
 
 rand = { version = "0.7", default-features = false }
 rand_chacha = { version = "0.2.1", default-features = false }
@@ -31,7 +31,7 @@ rayon = { version = "1" }
 derivative = { version = "2" }
 
 [dev-dependencies]
-algebra = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "development_tmp_fixes", features = ["bls12_381", "jubjub", "bn_382", "bls12_377", "tweedle"] }
+algebra = {  git = "https://github.com/HorizenOfficial/ginger-lib", branch = "negative_tests", features = ["bls12_381", "jubjub", "bn_382", "bls12_377", "tweedle"] }
 criterion = "0.3"
 rand_xorshift = "0.2"
 blake2 = { version = "0.8", default-features = false }

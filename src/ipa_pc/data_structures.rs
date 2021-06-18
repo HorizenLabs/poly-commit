@@ -32,6 +32,11 @@ impl<G: AffineCurve> PCUniversalParams for UniversalParams<G> {
         self.comm_key.len() - 1
     }
     fn get_hash(&self) -> &[u8] { self.hash.as_slice() }
+    fn copy_params(&mut self, other: &Self) {
+        self.s = other.s.clone();
+        self.h = other.h.clone();
+        self.hash = other.hash.clone();
+    }
 }
 
 /// `CommitterKey` is used to commit to, and create evaluation proofs for, a given
@@ -63,6 +68,13 @@ pub struct CommitterKey<G: AffineCurve> {
 
     /// H(max_degree_comm_key, h, s, max_degree)
     pub hash: Vec<u8>,
+}
+
+impl<G: AffineCurve> CommitterKey<G> {
+    /// Scale key for testing purpose
+    pub fn scale(&mut self, scaling_scalar: G::ScalarField) {
+        self.h = self.h.mul(scaling_scalar).into_affine();
+    }
 }
 
 impl<G: AffineCurve> SemanticallyValid for CommitterKey<G> {

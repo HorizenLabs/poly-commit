@@ -22,6 +22,9 @@ pub trait PCUniversalParams:
 
     /// Returns the hash of `self` instance.
     fn get_hash(&self) -> &[u8];
+
+    /// Setting important params from other instance
+    fn copy_params(&mut self, other: &Self);
 }
 
 /// Defines the minimal interface of committer keys for any polynomial
