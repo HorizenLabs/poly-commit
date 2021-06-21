@@ -185,6 +185,33 @@ impl<G: AffineCurve> CanonicalSerialize for Commitment<G>
             + self.comm.len() * self.comm[0].serialized_size()
             + self.shifted_comm.serialized_size()
     }
+
+    fn serialize_without_metadata<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        for c in self.comm.iter() {
+            CanonicalSerialize::serialize_without_metadata(c, &mut writer)?;
+        }
+
+        CanonicalSerialize::serialize_without_metadata(&self.shifted_comm, &mut writer)
+    }
+
+    #[inline]
+    fn serialize_uncompressed<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        // More than enough for practical applications
+        let len = u8::try_from(self.comm.len()).map_err(|_| SerializationError::NotEnoughSpace)?;
+        CanonicalSerialize::serialize_uncompressed(&len, &mut writer)?;
+
+        for c in self.comm.iter() {
+            CanonicalSerialize::serialize_uncompressed(c, &mut writer)?;
+        }
+
+        CanonicalSerialize::serialize_uncompressed(&self.shifted_comm, &mut writer)
+    }
+
+    fn uncompressed_size(&self) -> usize {
+        1
+            + self.comm.len() * self.comm[0].uncompressed_size()
+            + self.shifted_comm.uncompressed_size()
+    }
 }
 
 impl<G: AffineCurve> CanonicalDeserialize for Commitment<G> {
@@ -199,6 +226,53 @@ impl<G: AffineCurve> CanonicalDeserialize for Commitment<G> {
 
         // Read shifted comm
         let shifted_comm: Option<G> = CanonicalDeserialize::deserialize(&mut reader)?;
+
+        Ok(Self { comm, shifted_comm })
+    }
+
+    fn deserialize_unchecked<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // Read comm
+        let len: u8 = CanonicalDeserialize::deserialize_unchecked(&mut reader)?;
+        let mut comm = Vec::with_capacity(len as usize);
+        for _ in 0..(len as usize) {
+            let c: G = CanonicalDeserialize::deserialize_unchecked(&mut reader)?;
+            comm.push(c);
+        }
+
+        // Read shifted comm
+        let shifted_comm: Option<G> = CanonicalDeserialize::deserialize_unchecked(&mut reader)?;
+
+        Ok(Self { comm, shifted_comm })
+    }
+
+    #[inline]
+    fn deserialize_uncompressed<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // Read comm
+        let len: u8 = CanonicalDeserialize::deserialize_uncompressed(&mut reader)?;
+        let mut comm = Vec::with_capacity(len as usize);
+        for _ in 0..(len as usize) {
+            let c: G = CanonicalDeserialize::deserialize_uncompressed(&mut reader)?;
+            comm.push(c);
+        }
+
+        // Read shifted comm
+        let shifted_comm: Option<G> = CanonicalDeserialize::deserialize_uncompressed(&mut reader)?;
+
+        Ok(Self { comm, shifted_comm })
+    }
+
+    #[inline]
+    fn deserialize_uncompressed_unchecked<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // Read comm
+        let len: u8 = CanonicalDeserialize::deserialize_uncompressed_unchecked(&mut reader)?;
+        let mut comm = Vec::with_capacity(len as usize);
+        for _ in 0..(len as usize) {
+            let c: G = CanonicalDeserialize::deserialize_uncompressed_unchecked(&mut reader)?;
+            comm.push(c);
+        }
+
+        // Read shifted comm
+        let shifted_comm: Option<G> = CanonicalDeserialize::deserialize_uncompressed_unchecked(&mut reader)?;
 
         Ok(Self { comm, shifted_comm })
     }
@@ -229,7 +303,7 @@ impl<G: AffineCurve> ToBytes for Commitment<G> {
     fn write<W: Write>(&self, writer: W) -> std::io::Result<()> {
         use std::io::{Error, ErrorKind};
 
-        self.serialize_uncompressed(writer)
+        self.serialize_without_metadata(writer)
             .map_err(|e| Error::new(ErrorKind::Other, format!{"{:?}", e}))
     }
 }
@@ -385,6 +459,58 @@ impl<G: AffineCurve> CanonicalSerialize for Proof<G> {
             + self.hiding_comm.serialized_size()
             + self.rand.serialized_size()
     }
+
+    #[inline]
+    fn serialize_without_metadata<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+
+        for p in self.l_vec.iter() {
+            CanonicalSerialize::serialize_without_metadata(p, &mut writer)?;
+        }
+
+        for p in self.r_vec.iter() {
+            CanonicalSerialize::serialize_without_metadata(p, &mut writer)?;
+        }
+
+        CanonicalSerialize::serialize_without_metadata(&self.final_comm_key, &mut writer)?;
+        CanonicalSerialize::serialize_without_metadata(&self.c, &mut writer)?;
+        CanonicalSerialize::serialize_without_metadata(&self.hiding_comm, &mut writer)?;
+        CanonicalSerialize::serialize_without_metadata(&self.rand, &mut writer)
+    }
+
+    #[inline]
+    fn serialize_uncompressed<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        // l_vec
+        // More than enough for practical applications
+        let l_vec_len = u8::try_from(self.l_vec.len()).map_err(|_| SerializationError::NotEnoughSpace)?;
+        CanonicalSerialize::serialize_uncompressed(&l_vec_len, &mut writer)?;
+
+        for p in self.l_vec.iter() {
+            CanonicalSerialize::serialize_uncompressed(p, &mut writer)?;
+        }
+
+        // We know r_vec must be equal in size to l_vec, so no need to serialize it too
+        assert_eq!(self.l_vec.len(), self.r_vec.len());
+
+        for p in self.r_vec.iter() {
+            CanonicalSerialize::serialize_uncompressed(p, &mut writer)?;
+        }
+
+        // Serialize the other fields
+        CanonicalSerialize::serialize_uncompressed(&self.final_comm_key, &mut writer)?;
+        CanonicalSerialize::serialize_uncompressed(&self.c, &mut writer)?;
+        CanonicalSerialize::serialize_uncompressed(&self.hiding_comm, &mut writer)?;
+        CanonicalSerialize::serialize_uncompressed(&self.rand, &mut writer)
+    }
+
+    #[inline]
+    fn uncompressed_size(&self) -> usize {
+        1 + self.l_vec.iter().map(|item| item.uncompressed_size()).sum::<usize>()
+            + self.r_vec.iter().map(|item| item.uncompressed_size()).sum::<usize>()
+            + self.final_comm_key.uncompressed_size()
+            + self.c.uncompressed_size()
+            + self.hiding_comm.uncompressed_size()
+            + self.rand.uncompressed_size()
+    }
 }
 
 impl<G: AffineCurve> CanonicalDeserialize for Proof<G> {
@@ -411,6 +537,86 @@ impl<G: AffineCurve> CanonicalDeserialize for Proof<G> {
         let c: G::ScalarField = CanonicalDeserialize::deserialize(&mut reader)?;
         let hiding_comm: Option<G> = CanonicalDeserialize::deserialize(&mut reader)?;
         let rand: Option<G::ScalarField> = CanonicalDeserialize::deserialize(&mut reader)?;
+
+        Ok(Self { l_vec, r_vec, final_comm_key, c, hiding_comm, rand })
+    }
+
+    fn deserialize_unchecked<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // Read l_vec
+        let l_vec_len: u8 = CanonicalDeserialize::deserialize_unchecked(&mut reader)?;
+        let mut l_vec = Vec::with_capacity(l_vec_len as usize);
+        for _ in 0..(l_vec_len as usize) {
+            let c: G = CanonicalDeserialize::deserialize_unchecked(&mut reader)?;
+            l_vec.push(c);
+        }
+
+        // Read r_vec
+        let r_vec_len = l_vec_len;
+        let mut r_vec = Vec::with_capacity(r_vec_len as usize);
+        for _ in 0..(r_vec_len as usize) {
+            let c: G = CanonicalDeserialize::deserialize_unchecked(&mut reader)?;
+            r_vec.push(c);
+        }
+
+        // Read other fields
+        let final_comm_key: G = CanonicalDeserialize::deserialize_unchecked(&mut reader)?;
+        let c: G::ScalarField = CanonicalDeserialize::deserialize_unchecked(&mut reader)?;
+        let hiding_comm: Option<G> = CanonicalDeserialize::deserialize_unchecked(&mut reader)?;
+        let rand: Option<G::ScalarField> = CanonicalDeserialize::deserialize_unchecked(&mut reader)?;
+
+        Ok(Self { l_vec, r_vec, final_comm_key, c, hiding_comm, rand })
+    }
+
+    #[inline]
+    fn deserialize_uncompressed<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // Read l_vec
+        let l_vec_len: u8 = CanonicalDeserialize::deserialize_uncompressed(&mut reader)?;
+        let mut l_vec = Vec::with_capacity(l_vec_len as usize);
+        for _ in 0..(l_vec_len as usize) {
+            let c: G = CanonicalDeserialize::deserialize_uncompressed(&mut reader)?;
+            l_vec.push(c);
+        }
+
+        // Read r_vec
+        let r_vec_len = l_vec_len;
+        let mut r_vec = Vec::with_capacity(r_vec_len as usize);
+        for _ in 0..(r_vec_len as usize) {
+            let c: G = CanonicalDeserialize::deserialize_uncompressed(&mut reader)?;
+            r_vec.push(c);
+        }
+
+        // Read other fields
+        let final_comm_key: G = CanonicalDeserialize::deserialize_uncompressed(&mut reader)?;
+        let c: G::ScalarField = CanonicalDeserialize::deserialize_uncompressed(&mut reader)?;
+        let hiding_comm: Option<G> = CanonicalDeserialize::deserialize_uncompressed(&mut reader)?;
+        let rand: Option<G::ScalarField> = CanonicalDeserialize::deserialize_uncompressed(&mut reader)?;
+
+        Ok(Self { l_vec, r_vec, final_comm_key, c, hiding_comm, rand })
+    }
+
+    #[inline]
+    fn deserialize_uncompressed_unchecked<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // Read l_vec
+        let l_vec_len: u8 = CanonicalDeserialize::deserialize_uncompressed_unchecked(&mut reader)?;
+        let mut l_vec = Vec::with_capacity(l_vec_len as usize);
+        for _ in 0..(l_vec_len as usize) {
+            let c: G = CanonicalDeserialize::deserialize_uncompressed_unchecked(&mut reader)?;
+            l_vec.push(c);
+        }
+
+        // Read r_vec
+        let r_vec_len = l_vec_len;
+        let mut r_vec = Vec::with_capacity(r_vec_len as usize);
+        for _ in 0..(r_vec_len as usize) {
+            let c: G = CanonicalDeserialize::deserialize_uncompressed_unchecked(&mut reader)?;
+            r_vec.push(c);
+        }
+
+        // Read other fields
+        let final_comm_key: G = CanonicalDeserialize::deserialize_uncompressed_unchecked(&mut reader)?;
+        let c: G::ScalarField = CanonicalDeserialize::deserialize_uncompressed_unchecked(&mut reader)?;
+        let hiding_comm: Option<G> = CanonicalDeserialize::deserialize_uncompressed_unchecked(&mut reader)?;
+        let rand: Option<G::ScalarField> = CanonicalDeserialize::deserialize_uncompressed_unchecked(&mut reader)?;
 
         Ok(Self { l_vec, r_vec, final_comm_key, c, hiding_comm, rand })
     }
@@ -482,6 +688,57 @@ impl<G: AffineCurve> CanonicalSerialize for BatchProof<G> {
             + 1 + (self.batch_commitment.len() * self.batch_commitment[0].serialized_size())
             + 1 + self.batch_values.iter().map(|v| v.serialized_size()).sum::<usize>()
     }
+
+    fn serialize_without_metadata<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        // Serialize proof
+        CanonicalSerialize::serialize_without_metadata(&self.proof, &mut writer)?;
+
+        // Serialize batch_commitment
+        for comm in self.batch_commitment.iter() {
+            CanonicalSerialize::serialize_without_metadata(comm, &mut writer)?;
+        }
+
+        // Serialize batch values
+        for v in self.batch_values.iter() {
+            CanonicalSerialize::serialize(v, &mut writer)?;
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    fn serialize_uncompressed<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
+        // Serialize proof
+        CanonicalSerialize::serialize_uncompressed(&self.proof, &mut writer)?;
+
+        // Serialize batch_commitment
+        // More than enough for practical applications
+        let batch_commitment_len = u8::try_from(self.batch_commitment.len()).map_err(|_| SerializationError::NotEnoughSpace)?;
+        CanonicalSerialize::serialize_uncompressed(&batch_commitment_len, &mut writer)?;
+
+        // Save only one of the coordinates of the point and one byte of flags in order
+        // to be able to reconstruct the other coordinate
+        for comm in self.batch_commitment.iter() {
+            CanonicalSerialize::serialize_uncompressed(comm, &mut writer)?;
+        }
+
+        // Serialize batch values
+        // More than enough for practical applications
+        let batch_values_len = u8::try_from(self.batch_values.len()).map_err(|_| SerializationError::NotEnoughSpace)?;
+        CanonicalSerialize::serialize_uncompressed(&batch_values_len, &mut writer)?;
+        for v in self.batch_values.iter() {
+            CanonicalSerialize::serialize_uncompressed(v, &mut writer)?;
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    fn uncompressed_size(&self) -> usize {
+        self.proof.uncompressed_size()
+            + 1 + (self.batch_commitment.len() * self.batch_commitment[0].uncompressed_size())
+            + 1 + self.batch_values.iter().map(|v| v.uncompressed_size()).sum::<usize>()
+    }
 }
 
 impl<G: AffineCurve> CanonicalDeserialize for BatchProof<G> {
@@ -503,6 +760,77 @@ impl<G: AffineCurve> CanonicalDeserialize for BatchProof<G> {
         let mut batch_values = vec![];
         for _ in 0..(batch_values_len as usize) {
             let v: G::ScalarField = CanonicalDeserialize::deserialize(&mut reader)?;
+            batch_values.push(v);
+        }
+
+        Ok(Self { proof, batch_commitment, batch_values })
+    }
+
+    fn deserialize_unchecked<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // Read proof
+        let proof: Proof<G> = CanonicalDeserialize::deserialize_unchecked(&mut reader)?;
+
+        // Read batch commitment
+        let batch_commitment_len: u8 = CanonicalDeserialize::deserialize_unchecked(&mut reader)?;
+        let mut batch_commitment = Vec::with_capacity(batch_commitment_len as usize);
+        for _ in 0..(batch_commitment_len as usize) {
+            let comm: G = CanonicalDeserialize::deserialize_unchecked(&mut reader)?;
+            batch_commitment.push(comm);
+        }
+
+        // Read batch values
+        let batch_values_len: u8 = CanonicalDeserialize::deserialize_unchecked(&mut reader)?;
+        let mut batch_values = vec![];
+        for _ in 0..(batch_values_len as usize) {
+            let v: G::ScalarField = CanonicalDeserialize::deserialize_unchecked(&mut reader)?;
+            batch_values.push(v);
+        }
+
+        Ok(Self { proof, batch_commitment, batch_values })
+    }
+
+    #[inline]
+    fn deserialize_uncompressed<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // Read proof
+        let proof: Proof<G> = CanonicalDeserialize::deserialize_uncompressed(&mut reader)?;
+
+        // Read batch commitment
+        let batch_commitment_len: u8 = CanonicalDeserialize::deserialize_uncompressed(&mut reader)?;
+        let mut batch_commitment = Vec::with_capacity(batch_commitment_len as usize);
+        for _ in 0..(batch_commitment_len as usize) {
+            let comm: G = CanonicalDeserialize::deserialize_uncompressed(&mut reader)?;
+            batch_commitment.push(comm);
+        }
+
+        // Read batch values
+        let batch_values_len: u8 = CanonicalDeserialize::deserialize_uncompressed(&mut reader)?;
+        let mut batch_values = vec![];
+        for _ in 0..(batch_values_len as usize) {
+            let v: G::ScalarField = CanonicalDeserialize::deserialize_uncompressed(&mut reader)?;
+            batch_values.push(v);
+        }
+
+        Ok(Self { proof, batch_commitment, batch_values })
+    }
+
+    #[inline]
+    fn deserialize_uncompressed_unchecked<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // Read proof
+        let proof: Proof<G> = CanonicalDeserialize::deserialize_uncompressed_unchecked(&mut reader)?;
+
+        // Read batch commitment
+        let batch_commitment_len: u8 = CanonicalDeserialize::deserialize_uncompressed_unchecked(&mut reader)?;
+        let mut batch_commitment = Vec::with_capacity(batch_commitment_len as usize);
+        for _ in 0..(batch_commitment_len as usize) {
+            let comm: G = CanonicalDeserialize::deserialize_uncompressed_unchecked(&mut reader)?;
+            batch_commitment.push(comm);
+        }
+
+        // Read batch values
+        let batch_values_len: u8 = CanonicalDeserialize::deserialize_uncompressed_unchecked(&mut reader)?;
+        let mut batch_values = vec![];
+        for _ in 0..(batch_values_len as usize) {
+            let v: G::ScalarField = CanonicalDeserialize::deserialize_uncompressed_unchecked(&mut reader)?;
             batch_values.push(v);
         }
 

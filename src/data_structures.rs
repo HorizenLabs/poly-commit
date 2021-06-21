@@ -236,7 +236,7 @@ impl<C: PCCommitment> ToBytes for LabeledCommitment<C> {
     #[inline]
     fn write<W: Write>(&self, writer: W) -> IoResult<()> {
 
-        self.commitment.serialize_uncompressed(writer)
+        self.commitment.serialize_without_metadata(writer)
             .map_err(|e| IoError::new(ErrorKind::Other, format!{"{:?}", e}))
     }
 }
