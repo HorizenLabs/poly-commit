@@ -23,7 +23,7 @@ pub trait PCUniversalParams:
     /// Returns the hash of `self` instance.
     fn get_hash(&self) -> &[u8];
 
-    /// Setting important params from other instance
+    /// Copy other instance params into this. Used for testing purposes.
     fn copy_params(&mut self, other: &Self);
 }
 
