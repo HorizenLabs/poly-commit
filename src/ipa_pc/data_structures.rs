@@ -1,12 +1,13 @@
 use crate::*;
 use crate::{PCCommitterKey, PCVerifierKey, Vec};
 use algebra::{
-    Field, UniformRand, AffineCurve, PrimeField, ToBytes,
+    Field, UniformRand, AffineCurve, ProjectiveCurve, PrimeField, ToBytes,
 };
 use std::{
     io::{ Read, Write }, vec, convert::TryFrom,
 };
 use rand_core::RngCore;
+use rand::thread_rng;
 
 /// `UniversalParams` are the universal parameters for the inner product arg scheme.
 #[derive(Derivative)]
@@ -31,6 +32,11 @@ impl<G: AffineCurve> PCUniversalParams for UniversalParams<G> {
         self.comm_key.len() - 1
     }
     fn get_hash(&self) -> &[u8] { self.hash.as_slice() }
+    fn copy_params(&mut self, other: &Self) {
+        self.s = other.s.clone();
+        self.h = other.h.clone();
+        self.hash = other.hash.clone();
+    }
 }
 
 /// `CommitterKey` is used to commit to, and create evaluation proofs for, a given
@@ -64,6 +70,13 @@ pub struct CommitterKey<G: AffineCurve> {
     pub hash: Vec<u8>,
 }
 
+impl<G: AffineCurve> CommitterKey<G> {
+    /// Scale key for testing purpose
+    pub fn scale(&mut self, scaling_scalar: G::ScalarField) {
+        self.h = self.h.mul(scaling_scalar).into_affine();
+    }
+}
+
 impl<G: AffineCurve> SemanticallyValid for CommitterKey<G> {
 
     // Technically this function is redundant, since the keys are generated
@@ -87,6 +100,14 @@ impl<G: AffineCurve> PCCommitterKey for CommitterKey<G> {
     fn get_hash(&self) -> &[u8] {
         self.hash.as_slice()
     }
+
+    /// Randomize key for testing purpose
+    fn randomize(&mut self) {
+        let mut rng = thread_rng();
+        self.comm_key = self.comm_key.iter().map(|_| {
+            G::Projective::rand(&mut rng).into_affine()
+        }).collect::<Vec<_>>();
+    }
 }
 
 /// `VerifierKey` is used to check evaluation proofs for a given commitment.
@@ -103,6 +124,14 @@ impl<G: AffineCurve> PCVerifierKey for VerifierKey<G> {
 
     fn get_hash(&self) -> &[u8] {
         self.hash.as_slice()
+    }
+
+    /// Randomize key for testing purpose
+    fn randomize(&mut self) {
+        let mut rng = thread_rng();
+        self.comm_key = self.comm_key.iter().map(|_| {
+            G::Projective::rand(&mut rng).into_affine()
+        }).collect::<Vec<_>>();
     }
 }
 
@@ -260,6 +289,12 @@ impl<G: AffineCurve> PCCommitment for Commitment<G> {
 
     fn has_degree_bound(&self) -> bool {
         self.shifted_comm.is_some()
+    }
+
+    fn randomize(&mut self) {
+        let mut rng = thread_rng();
+        let comm_len = self.comm.len();
+        self.comm = (0..comm_len).map(|_| G::Projective::rand(&mut rng).into_affine()).collect::<Vec<_>>();
     }
 }
 
