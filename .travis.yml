@@ -30,5 +30,5 @@ script: ci/script.sh
 
 jobs:
   include:
-    - name: bionic_rust-1.51.0_latest_asm_target-feature
+    - name: bionic_rust-1.51.0_latest
       env: IMAGE_TAG=bionic_rust-1.51.0_latest TESTS='000,001,002'
