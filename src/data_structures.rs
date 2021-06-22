@@ -22,6 +22,9 @@ pub trait PCUniversalParams:
 
     /// Returns the hash of `self` instance.
     fn get_hash(&self) -> &[u8];
+
+    /// Copy other instance params into this. Used for testing purposes.
+    fn copy_params(&mut self, other: &Self);
 }
 
 /// Defines the minimal interface of committer keys for any polynomial
@@ -44,6 +47,9 @@ pub trait PCCommitterKey:
 
     /// Returns the hash of `self` instance.
     fn get_hash(&self) -> &[u8];
+
+    /// Randomize key for testing purpose
+    fn randomize(&mut self);
 }
 
 /// Defines the minimal interface of verifier keys for any polynomial
@@ -66,6 +72,9 @@ pub trait PCVerifierKey:
 
     /// Returns the hash of `self` instance.
     fn get_hash(&self) -> &[u8];
+
+    /// Randomize key for testing purpose
+    fn randomize(&mut self);
 }
 
 /// Defines the minimal interface of prepared verifier keys for any polynomial
@@ -89,6 +98,9 @@ pub trait PCCommitment:
 
     /// Does this commitment have a degree bound?
     fn has_degree_bound(&self) -> bool;
+
+    /// Randomize commiment values for testing purpose
+    fn randomize(&mut self);
 }
 
 /// Defines the minimal interface of prepared commitments for any polynomial
@@ -209,6 +221,9 @@ impl<C: PCCommitment> LabeledCommitment<C> {
     pub fn degree_bound(&self) -> Option<usize> {
         self.degree_bound
     }
+
+    /// Randomize commitment for test purpose
+    pub fn randomize(&mut self) { self.commitment.randomize(); }
 }
 
 impl<C: PCCommitment> SemanticallyValid for LabeledCommitment<C> {
