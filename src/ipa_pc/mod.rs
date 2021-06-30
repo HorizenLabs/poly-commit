@@ -49,16 +49,17 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         scalars: &[G::ScalarField],
         hiding_generator: Option<G>,
         randomizer: Option<G::ScalarField>,
-    ) -> G::Projective {
+    ) -> Result<G::Projective, Error> {
         let scalars_bigint = scalars.par_iter()
             .map(|s| s.into_repr())
             .collect::<Vec<_>>();
-        let mut comm = VariableBaseMSM::multi_scalar_mul(&comm_key, &scalars_bigint);
+        let mut comm = VariableBaseMSM::multi_scalar_mul(&comm_key, &scalars_bigint)
+            .map_err(|e| Error::IncorrectInputLength(e.to_string()))?;
         if randomizer.is_some() {
             assert!(hiding_generator.is_some());
             comm += &hiding_generator.unwrap().mul(randomizer.unwrap());
         }
-        comm
+        Ok(comm)
     }
 
     #[inline]
@@ -162,10 +163,10 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             let (key_l, key_r) = comm_key.split_at(n / 2);
             let (key_proj_l, _) = key_proj.split_at_mut(n / 2);
 
-            let l = Self::cm_commit(key_l, coeffs_r, None, None)
+            let l = Self::cm_commit(key_l, coeffs_r, None, None)?
                 + &h_prime.mul(Self::inner_product(coeffs_r, z_l));
 
-            let r = Self::cm_commit(key_r, coeffs_l, None, None)
+            let r = Self::cm_commit(key_r, coeffs_l, None, None)?
                 + &h_prime.mul(Self::inner_product(coeffs_l, z_r));
 
             let lr = G::Projective::batch_normalization_into_affine(vec![l, r]);
@@ -342,7 +343,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             &[proof.c.clone(), v_prime],
             None,
             None,
-        );
+        )?;
 
         if !ProjectiveCurve::is_zero(&(round_commitment_proj - &check_commitment_elem)) {
             end_timer!(check_time);
@@ -787,31 +788,33 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             // split poly in segments and commit all of them without shifting
             comm = (0..segments_count).into_iter().map(
                 |i| {
-                    Self::cm_commit(
+                    Ok(Self::cm_commit(
                         &ck.comm_key,
                         &polynomial.coeffs[i * key_len..core::cmp::min((i + 1) * key_len, p_len)],
                         Some(ck.s),
                         Some(randomness.rand[i]),
-                    ).into_affine()
+                    )?.into_affine())
                 }
-            ).collect();
+            ).collect::<Result<Vec<_>, _>>()?;
 
             // committing only last segment shifted to the right edge
-            let shifted_comm = degree_bound.and_then(|degree_bound| {
+            let shifted_comm = if degree_bound.is_some() {
+                let degree_bound = degree_bound.unwrap();
                 let degree_bound_len = degree_bound + 1; // Convert to the maximum number of coefficients
                 if degree_bound_len % key_len != 0 {
-                    Some(
-                        Self::cm_commit(
-                            &ck.comm_key[key_len - (degree_bound_len % key_len)..],
-                            &polynomial.coeffs[(segments_count - 1) * key_len..p_len],
-                            Some(ck.s),
-                            randomness.shifted_rand,
-                        ).into_affine()
-                    )
+                    let comm = Self::cm_commit(
+                        &ck.comm_key[key_len - (degree_bound_len % key_len)..],
+                        &polynomial.coeffs[(segments_count - 1) * key_len..p_len],
+                        Some(ck.s),
+                        randomness.shifted_rand,
+                    )?.into_affine();
+                    Some(comm)
                 } else {
                     None
                 }
-            });
+            } else {
+                None
+            };
 
             let commitment = Commitment { comm, shifted_comm };
             let labeled_comm = LabeledCommitment::new(label.to_string(), commitment, degree_bound);
@@ -1002,7 +1005,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                 hiding_polynomial.coeffs.as_slice(),
                 Some(ck.s),
                 Some(hiding_rand),
-            );
+            )?;
 
             let mut batch = G::Projective::batch_normalization_into_affine(vec![
                 combined_commitment_proj,
@@ -1079,10 +1082,10 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             let (key_l, key_r) = comm_key.split_at(n / 2);
             let (key_proj_l, _) = key_proj.split_at_mut(n / 2);
 
-            let l = Self::cm_commit(key_l, coeffs_r, None, None)
+            let l = Self::cm_commit(key_l, coeffs_r, None, None)?
                 + &h_prime.mul(Self::inner_product(coeffs_r, z_l));
 
-            let r = Self::cm_commit(key_r, coeffs_l, None, None)
+            let r = Self::cm_commit(key_r, coeffs_l, None, None)?
                 + &h_prime.mul(Self::inner_product(coeffs_l, z_r));
 
             let lr = G::Projective::batch_normalization_into_affine(vec![l, r]);
@@ -1234,14 +1237,14 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
 
             batch_commitment = (0..segments_count).into_iter().map(
                 |i| {
-                    Self::cm_commit(
+                    Ok(Self::cm_commit(
                         &ck.comm_key,
                         &batch_polynomial.coeffs[i * key_len..core::cmp::min((i + 1) * key_len, p_len)],
                         Some(ck.s),
                         Some(batch_randomness.rand[i]),
-                    ).into_affine()
+                    )?.into_affine())
                 }
-            ).collect();
+            ).collect::<Result<Vec<_>, _>>()?;
 
         } else {
 
@@ -1251,7 +1254,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
                     batch_polynomial.coeffs.as_slice(),
                     Some(ck.s),
                     Some(batch_randomness.rand[0]),
-                ).into_affine()
+                )?.into_affine()
             ];
         }
         end_timer!(commit_time);
@@ -1357,7 +1360,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             check_poly_coeffs.as_slice(),
             None,
             None,
-        );
+        )?;
         end_timer!(hard_time);
 
         if !ProjectiveCurve::is_zero(&(final_key - &proof.final_comm_key.into_projective())) {
@@ -1400,7 +1403,7 @@ impl<G: AffineCurve, D: Digest> PolynomialCommitment<G::ScalarField> for InnerPr
             check_poly_coeffs.as_slice(),
             None,
             None,
-        );
+        )?;
         if !ProjectiveCurve::is_zero(&(final_key - &proof_final_key.into_projective())) {
             end_timer!(check_time);
             return Ok(false);
