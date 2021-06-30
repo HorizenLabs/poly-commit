@@ -4,7 +4,7 @@ use crate::{LabeledCommitment, LabeledPolynomial, LabeledRandomness};
 use crate::{PCRandomness, PCUniversalParams, Polynomial, PolynomialCommitment};
 use algebra::msm::VariableBaseMSM;
 use algebra::{SemanticallyValid, ToBytes, to_bytes, Field, PrimeField, UniformRand, Group, AffineCurve, ProjectiveCurve};
-use std::{format, vec, cmp};
+use std::{format, vec};
 use std::marker::PhantomData;
 use rand_core::RngCore;
 
@@ -53,10 +53,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let scalars_bigint = scalars.par_iter()
             .map(|s| s.into_repr())
             .collect::<Vec<_>>();
-        let mut comm = VariableBaseMSM::multi_scalar_mul(
-            &comm_key[0..cmp::min(scalars_bigint.len(), comm_key.len())],
-            &scalars_bigint[0..cmp::min(scalars_bigint.len(), comm_key.len())]
-        );
+        let mut comm = VariableBaseMSM::multi_scalar_mul(&comm_key, &scalars_bigint);
         if randomizer.is_some() {
             assert!(hiding_generator.is_some());
             comm += &hiding_generator.unwrap().mul(randomizer.unwrap());
