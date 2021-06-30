@@ -918,24 +918,6 @@ pub mod tests {
                 &proof,
                 &mut fs_rng
             )?);
-
-            // Assert failure using a smaller key
-            let smaller_degree = supported_degree/2;
-            let pp = PC::setup(smaller_degree)?;
-            let (_, vk) = PC::trim(
-                &pp,
-                smaller_degree,
-            )?;
-
-            let mut fs_rng = PC::RandomOracle::new();
-            assert!(!PC::batch_check(
-                &vk,
-                &comms,
-                &query_set,
-                &values,
-                &proof,
-                &mut fs_rng
-            )?);
         }
         Ok(())
     }
