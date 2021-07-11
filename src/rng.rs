@@ -1,9 +1,10 @@
 use crate::Vec;
-use algebra::{FromBytes, ToBytes, Field, UniformRand};
+use algebra::{FromBytes, ToBytes, Field};
 use std::marker::PhantomData;
 use digest::{generic_array::GenericArray, Digest};
 use rand_chacha::ChaChaRng;
 use rand_core::{RngCore, SeedableRng};
+use rand::Rng;
 
 /// General trait for `SeedableRng` that refreshes its seed by hashing together the previous seed
 /// and the new seed material.
@@ -22,7 +23,7 @@ pub trait FiatShamirRng: RngCore {
 
     /// Squeeze a new random field element
     fn squeeze_128_bits_challenge<F: Field>(&mut self) -> F {
-        u128::rand(self).into()
+        self.gen_range(1u128..u128::MAX).into()
     }
 
     /// Get the internal state in the form of an instance of `Self::Seed`.
