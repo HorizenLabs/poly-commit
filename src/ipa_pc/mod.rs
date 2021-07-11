@@ -511,7 +511,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             .zip(states)
             .map(|((((commitments, query_set), values), proof), state)|
                 {
-                    let mut fs_rng = FiatShamirChaChaRng::<D>::new();
+                    let mut fs_rng = FiatShamirChaChaRng::<D>::from_seed(&Self::PROTOCOL_NAME);
                     fs_rng.set_state(state.clone());
 
                     // Perform succinct check of i-th proof
@@ -1430,6 +1430,7 @@ mod tests {
     use digest::Digest;
     use blake2::Blake2s;
     use crate::{PolynomialCommitment, PCCommitterKey, PCUniversalParams};
+    use crate::rng::{FiatShamirChaChaRng, FiatShamirRng};
 
     type PC<E, D> = InnerProductArgPC<E, D>;
     type PC_DEE = PC<Affine, Blake2s>;
@@ -1806,6 +1807,26 @@ mod tests {
 
         let h = Blake2s::digest(&to_bytes![&ck.comm_key, &ck.h, &ck.s, ck.max_degree as u32].unwrap()).to_vec();
         assert_ne!(h.as_slice(), ck.get_hash());
+    }
+
+    #[test]
+    fn fiat_shamir_rng_test() {
+        use algebra::fields::tweedle::fr::Fr;
+        use algebra::UniformRand;
+
+        let seed = b"";
+        let mut rng1 = FiatShamirChaChaRng::<Blake2s>::from_seed(seed);
+        let mut rng2 = FiatShamirChaChaRng::<Blake2s>::from_seed(seed);
+
+        let a = Fr::rand(&mut rng1);
+        let b = Fr::rand(&mut rng2);
+
+        assert_eq!(a, b);
+
+        let a: Fr = rng1.squeeze_128_bits_challenge();
+        let b: Fr = rng2.squeeze_128_bits_challenge();
+
+        assert_eq!(a, b);
     }
 
     #[test]

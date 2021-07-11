@@ -1,5 +1,5 @@
 use crate::Vec;
-use algebra::{FromBytes, ToBytes, to_bytes, Field, UniformRand};
+use algebra::{FromBytes, ToBytes, Field, UniformRand};
 use std::marker::PhantomData;
 use digest::{generic_array::GenericArray, Digest};
 use rand_chacha::ChaChaRng;
@@ -11,9 +11,6 @@ use rand_core::{RngCore, SeedableRng};
 pub trait FiatShamirRng: RngCore {
     /// Internal State
     type State: Clone;
-
-    /// initialize the RNG
-    fn new() -> Self;
 
     /// Create a new `Self` by initializing its internal state with a fresh `seed`,
     /// generically being something serializable to a byte array.
@@ -71,11 +68,6 @@ impl<D: Digest> FiatShamirRng for FiatShamirChaChaRng<D> {
 
     type State = GenericArray<u8, D::OutputSize>;
 
-    fn new() -> Self {
-        let seed = [0u8; 32];
-        Self::from_seed(&to_bytes![seed].unwrap())
-    }
-
     /// Refresh `self.seed` with new material. Achieved by setting
     /// `self.seed = H(self.seed || new_seed)`.
     #[inline]
@@ -92,9 +84,9 @@ impl<D: Digest> FiatShamirRng for FiatShamirChaChaRng<D> {
     #[inline]
     fn from_seed<'a, T: 'a + ToBytes>(seed: &'a T) -> Self {
         let mut bytes = Vec::new();
-        seed.write(&mut bytes).expect("failed to convert to bytes");
+        seed.write(&mut bytes).unwrap_or(());
         let seed = D::digest(&bytes);
-        let r_seed: [u8; 32] = FromBytes::read(seed.as_ref()).expect("failed to get [u32; 8]");
+        let r_seed: [u8; 32] = FromBytes::read(seed.as_ref()).unwrap_or([0u8; 32]);
         let r = ChaChaRng::from_seed(r_seed);
         Self {
             r,

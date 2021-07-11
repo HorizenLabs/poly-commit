@@ -674,7 +674,7 @@ pub mod tests {
             }
             println!("Generated query set");
 
-            let mut fs_rng = PC::RandomOracle::new();
+            let mut fs_rng = PC::RandomOracle::from_seed(b"TEST_SEED");
             let proof = PC::batch_open(
                 &ck,
                 &polynomials,
@@ -688,7 +688,7 @@ pub mod tests {
 
             test_canonical_serialize_deserialize(true, &proof);
 
-            let mut fs_rng = PC::RandomOracle::new();
+            let mut fs_rng = PC::RandomOracle::from_seed(b"TEST_SEED");
             let result = PC::batch_check(
                 &vk,
                 &comms,
@@ -864,7 +864,7 @@ pub mod tests {
             }
             println!("Generated query set");
 
-            let mut fs_rng = PC::RandomOracle::new();
+            let mut fs_rng = PC::RandomOracle::from_seed(b"TEST_SEED");
             let proof = PC::batch_open(
                 &ck,
                 &polynomials,
@@ -880,7 +880,7 @@ pub mod tests {
             test_canonical_serialize_deserialize(true, &proof);
 
             // Assert success using the same key
-            let mut fs_rng = PC::RandomOracle::new();
+            let mut fs_rng = PC::RandomOracle::from_seed(b"TEST_SEED");
             let result = PC::batch_check(
                 &vk,
                 &comms,
@@ -909,7 +909,7 @@ pub mod tests {
                 bigger_degree,
             )?;
 
-            let mut fs_rng = PC::RandomOracle::new();
+            let mut fs_rng = PC::RandomOracle::from_seed(b"TEST_SEED");
             assert!(PC::batch_check(
                 &vk,
                 &comms,
@@ -1058,7 +1058,7 @@ pub mod tests {
             println!("Generated query set");
             println!("Linear combinations: {:?}", linear_combinations);
 
-            let mut fs_rng = PC::RandomOracle::new();
+            let mut fs_rng = PC::RandomOracle::from_seed(b"TEST_SEED");
             let proof = PC::open_combinations(
                 &ck,
                 &linear_combinations,
@@ -1073,7 +1073,7 @@ pub mod tests {
 
             println!("Generated proof");
 
-            let mut fs_rng = PC::RandomOracle::new();
+            let mut fs_rng = PC::RandomOracle::from_seed(b"TEST_SEED");
             let result = PC::check_combinations(
                 &vk,
                 &linear_combinations,
