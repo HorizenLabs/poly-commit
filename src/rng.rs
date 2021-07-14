@@ -1,6 +1,9 @@
 use crate::Vec;
 use algebra::{FromBytes, ToBytes, Field};
-use std::marker::PhantomData;
+use std::{
+    convert::TryInto,
+    marker::PhantomData
+};
 use digest::{generic_array::GenericArray, Digest};
 use rand_chacha::ChaChaRng;
 use rand_core::{RngCore, SeedableRng};
@@ -105,6 +108,8 @@ impl<D: Digest> FiatShamirRng for FiatShamirChaChaRng<D> {
     /// Set `self.seed` to the specified value
     #[inline]
     fn set_state(&mut self, new_state: Self::State) {
-        self.seed = new_state
+        self.seed = new_state.clone();
+        let r_seed: [u8; 32] = new_state.as_ref().try_into().unwrap();
+        self.r = ChaChaRng::from_seed(r_seed);
     }
 }
