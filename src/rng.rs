@@ -1,9 +1,13 @@
 use crate::Vec;
-use algebra::{FromBytes, ToBytes, to_bytes, Field, UniformRand};
-use std::marker::PhantomData;
+use algebra::{FromBytes, ToBytes, Field};
+use std::{
+    convert::TryInto,
+    marker::PhantomData
+};
 use digest::{generic_array::GenericArray, Digest};
 use rand_chacha::ChaChaRng;
 use rand_core::{RngCore, SeedableRng};
+use rand::Rng;
 
 /// General trait for `SeedableRng` that refreshes its seed by hashing together the previous seed
 /// and the new seed material.
@@ -11,9 +15,6 @@ use rand_core::{RngCore, SeedableRng};
 pub trait FiatShamirRng: RngCore {
     /// Internal State
     type State: Clone;
-
-    /// initialize the RNG
-    fn new() -> Self;
 
     /// Create a new `Self` by initializing its internal state with a fresh `seed`,
     /// generically being something serializable to a byte array.
@@ -25,7 +26,7 @@ pub trait FiatShamirRng: RngCore {
 
     /// Squeeze a new random field element
     fn squeeze_128_bits_challenge<F: Field>(&mut self) -> F {
-        u128::rand(self).into()
+        self.gen_range(1u128..u128::MAX).into()
     }
 
     /// Get the internal state in the form of an instance of `Self::Seed`.
@@ -71,11 +72,6 @@ impl<D: Digest> FiatShamirRng for FiatShamirChaChaRng<D> {
 
     type State = GenericArray<u8, D::OutputSize>;
 
-    fn new() -> Self {
-        let seed = [0u8; 32];
-        Self::from_seed(&to_bytes![seed].unwrap())
-    }
-
     /// Refresh `self.seed` with new material. Achieved by setting
     /// `self.seed = H(self.seed || new_seed)`.
     #[inline]
@@ -92,9 +88,9 @@ impl<D: Digest> FiatShamirRng for FiatShamirChaChaRng<D> {
     #[inline]
     fn from_seed<'a, T: 'a + ToBytes>(seed: &'a T) -> Self {
         let mut bytes = Vec::new();
-        seed.write(&mut bytes).expect("failed to convert to bytes");
+        seed.write(&mut bytes).unwrap_or(());
         let seed = D::digest(&bytes);
-        let r_seed: [u8; 32] = FromBytes::read(seed.as_ref()).expect("failed to get [u32; 8]");
+        let r_seed: [u8; 32] = FromBytes::read(seed.as_ref()).unwrap_or([0u8; 32]);
         let r = ChaChaRng::from_seed(r_seed);
         Self {
             r,
@@ -112,6 +108,8 @@ impl<D: Digest> FiatShamirRng for FiatShamirChaChaRng<D> {
     /// Set `self.seed` to the specified value
     #[inline]
     fn set_state(&mut self, new_state: Self::State) {
-        self.seed = new_state
+        self.seed = new_state.clone();
+        let r_seed: [u8; 32] = new_state.as_ref().try_into().unwrap();
+        self.r = ChaChaRng::from_seed(r_seed);
     }
 }
