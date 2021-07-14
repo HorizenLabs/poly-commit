@@ -77,7 +77,9 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
     /// Computes an opening proof of multiple check polynomials with a corresponding
     /// commitment GFin opened at point.
     /// No segmentation here: Bullet Polys are at most as big as the committer key.
-    pub fn open_check_polys<'a>(
+    // It should ok to compute the reduction polys h_1(X),..., h_m(X) and call
+    // single_point_multi_poly_open() on a random challenge x.
+    pub fn open_reduction_polynomials<'a>(
         ck: &CommitterKey<G>,
         xi_s: impl IntoIterator<Item = &'a SuccinctCheckPolynomial<G::ScalarField>>,
         point: G::ScalarField,
@@ -103,6 +105,11 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         // Sample new batching challenge
         let random_scalar: G::ScalarField = fs_rng.squeeze_128_bits_challenge();
 
+        // We do not call the single_point_multi_poly_open() as computing the vector
+        // of reduction polynomials might cost too much memory.
+        // Instead we compute the random linear combination by an incremental procedure
+        // and call the single_point_single_poly_open(),
+
         // Collect the powers of the batching challenge in a vector
         let mut batching_chal = G::ScalarField::one();
         let mut batching_chals = vec![G::ScalarField::zero(); xi_s_vec.len()];
@@ -118,6 +125,8 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
             .map(|(chal, xi_s)| {
                 Polynomial::from_coefficients_vec(xi_s.compute_scaled_coeffs(chal))
             }).reduce(|| Polynomial::zero(), |acc, poly| &acc + &poly);
+
+        // then call single_point_multi_poly_open(combined_check_polys ) should be ok now?
 
         // It's not necessary to use the full length of the ck if all the Bullet Polys are smaller:
         // trim the ck if that's the case
@@ -157,6 +166,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
         let mut r_vec = Vec::with_capacity(log_key_len);
 
         let mut n = key_len;
+        // why doing the Bullet reduction here?
         while n > 1 {
             let (coeffs_l, coeffs_r) = coeffs.split_at_mut(n / 2);
             let (z_l, z_r) = z.split_at_mut(n / 2);
@@ -213,7 +223,7 @@ impl<G: AffineCurve, D: Digest> InnerProductArgPC<G, D> {
 
     /// The succinct portion of verifying a multi-poly single-point opening proof.
     /// If successful, returns the (recomputed) reduction challenge.
-    pub fn succinct_check<'a>(
+    pub fn succinct_multi_poly_single_point_verify<'a>(
         vk: &VerifierKey<G>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Commitment<G>>>,
         point: G::ScalarField,

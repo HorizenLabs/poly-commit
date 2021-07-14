@@ -150,14 +150,43 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         ),
         Self::Error,
     >;
+    // A domain-extended dlog scheme would call the simple dlog scheme even in the commit.
 
+    // Low-level Atomic procedures
+    // single point single poly open
+    fn open() {
+        // no default can be implemented
+        // if done cleanly, segmentizedIpa::open() should call non_segmentizedIpa::open_lc().
+        // So we would need to implement this trait also for the latter.
+        // To do it quicker we can just implement it right in this function.
+    }
+
+    // single point single poly verify
+    fn verify(){
+        // no default can be implemented
+        // if done cleanly, segmentizedIpa::verify() should call non_segmentizedIpa::verify_lc().
+        // So we would need to implement this trait also for the latter.
+        // To do it quicker we can just implement it right in this function.
+    }
+
+    // single point single PolyLC open
+    fn open_lc(){
+        //has a default implementation
+        // calls open()
+    }
+
+    // single point single PolyLC verify
+    fn verify_lc(){
+        //has a default implementation
+        // calls verify()
+    }
     /// Single point multi poly open:
     /// On input a list of labeled polynomials and a query point, `open` outputs a proof of evaluation
     /// of the polynomials at the query point.
     /// For now it is just a wrapper for the low-level function `open_individual_opening_challenges()`
     /// and hence assumes that the statement of the opening proof (i.e. the commitments, the query point,
     /// and the evaluations) are bound to the state of the Fiat-Shamir rng. 
-    fn open<'a>(
+    fn single_point_multi_poly_open<'a>(
         ck: &Self::CommitterKey,
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
@@ -170,15 +199,25 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             Self::Randomness: 'a,
             Self::Commitment: 'a,
     {
-        Self::open_individual_opening_challenges(
-            ck,
-            labeled_polynomials,
-            commitments,
-            point,
-            fs_rng,
-            rands,
-            rng,
-        )
+        // default implemenation uses open_lc
+    }
+
+    /// Single point multi poly verify:
+    /// Verifies that `values` are the evaluations at `point` of the polynomials
+    /// committed inside `commitments`.
+    fn single_point_multi_poly_verify<'a>(
+        vk: &Self::VerifierKey,
+        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
+        point: F,
+        values: impl IntoIterator<Item = F>,
+        proof: &Self::Proof,
+        fs_rng: &mut Self::RandomOracle,
+    ) -> Result<bool, Self::Error>
+        where
+            Self::Commitment: 'a,
+    {
+        // default implementation uses verify_lc
+
     }
 
     /// Multi point multi poly open:
@@ -187,8 +226,7 @@ pub trait PolynomialCommitment<F: Field>: Sized {
     /// For now it is just a wrapper for the low-level function `open_individual_opening_challenges()`
     /// and hence assumes that the statement of the opening proof (i.e. the commitments, the query set,
     /// and the evaluations) are bound to the state of the Fiat-Shamir rng. 
-    /// TODO: rename this function
-    fn batch_open<'a>(
+    fn multi_point_multi_poly_open<'a>(
         ck: &Self::CommitterKey,
         labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
@@ -201,47 +239,17 @@ pub trait PolynomialCommitment<F: Field>: Sized {
             Self::Randomness: 'a,
             Self::Commitment: 'a,
     {
-        Self::batch_open_individual_opening_challenges(
-            ck,
-            labeled_polynomials,
-            commitments,
-            query_set,
-            fs_rng,
-            rands,
-            rng,
-        )
+        // default implementation for the Boneh multi-point eval proof
+        // (our original implementation calls single_point_multi_poly_open.
+        // But the real (and more efficient) Boneh method only calls again open_lc
     }
 
-    /// Single point multi poly verify:
-    /// Verifies that `values` are the evaluations at `point` of the polynomials
-    /// committed inside `commitments`.
-    fn check<'a>(
-        vk: &Self::VerifierKey,
-        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
-        point: F,
-        values: impl IntoIterator<Item = F>,
-        proof: &Self::Proof,
-        fs_rng: &mut Self::RandomOracle,
-    ) -> Result<bool, Self::Error>
-        where
-            Self::Commitment: 'a,
-    {
-        // as in open(), setup Fiat-Shamir rng, etc.
-        Self::check_individual_opening_challenges(
-            vk,
-            commitments,
-            point,
-            values,
-            proof,
-            fs_rng,
-        )
-    }
 
     /// Multi point multi poly verify:
     /// Checks that `values` are the true evaluations at `query_set` of the polynomials
     /// committed in `labeled_commitments`.
     /// TODO: rename this function
-    fn batch_check<'a>(
+    fn multi_point_multi_poly_verify<'a>(
         vk: &Self::VerifierKey,
         commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
         query_set: &QuerySet<F>,
@@ -252,261 +260,9 @@ pub trait PolynomialCommitment<F: Field>: Sized {
         where
             Self::Commitment: 'a,
     {
-        Self::batch_check_individual_opening_challenges(
-            vk,
-            commitments,
-            query_set,
-            evaluations,
-            proof,
-            fs_rng,
-        )
-    }
-
-    /// Multi point multi LC open:
-    /// On input a list of polynomials, linear combinations of those polynomials,
-    /// and a query set, `open_combination` outputs a proof of evaluation of
-    /// the combinations at the points in the query set.
-    /// For now it is just a wrapper for the low-level function `open_combinations_individual_opening_challenges()`
-    /// and hence assumes that the statement of the opening proof (i.e. the LCs, the query set,
-    /// and the evaluations) are bound to the state of the Fiat-Shamir rng. 
-    fn open_combinations<'a>(
-        ck: &Self::CommitterKey,
-        linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
-        polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
-        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
-        query_set: &QuerySet<F>,
-        fs_rng: &mut Self::RandomOracle,
-        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
-        rng: Option<&mut dyn RngCore>,
-    ) -> Result<BatchLCProof<F, Self>, Self::Error>
-        where
-            Self::Randomness: 'a,
-            Self::Commitment: 'a,
-    {
-        Self::open_combinations_individual_opening_challenges(
-            ck,
-            linear_combinations,
-            polynomials,
-            commitments,
-            query_set,
-            fs_rng,
-            rands,
-            rng,
-        )
-    }
-
-    /// Multi point multi LC verify.
-    /// Checks that `evaluations` are the true evaluations at `query_set` of the
-    /// linear combinations of polynomials committed in `commitments`.
-    fn check_combinations<'a>(
-        vk: &Self::VerifierKey,
-        linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
-        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
-        eqn_query_set: &QuerySet<F>,
-        eqn_evaluations: &Evaluations<F>,
-        proof: &BatchLCProof<F, Self>,
-        fs_rng: &mut Self::RandomOracle,
-    ) -> Result<bool, Self::Error>
-        where
-            Self::Commitment: 'a,
-    {
-        Self::check_combinations_individual_opening_challenges(
-            vk,
-            linear_combinations,
-            commitments,
-            eqn_query_set,
-            eqn_evaluations,
-            proof,
-            fs_rng,
-        )
-    }
-
-    /// Single point multi poly open, allowing the random oracle to be passed from
-    /// 'outside' to the function.
-    /// CAUTION: This is a low-level function to be handled carefully, typically
-    /// presuming that commitments and query_set is already bound to the internal
-    /// state of the Fiat-Shamir rng.
-    /// TODO: rename this function
-    fn open_individual_opening_challenges<'a>(
-        ck: &Self::CommitterKey,
-        labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
-        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
-        point: F,
-        fs_rng: &mut Self::RandomOracle,
-        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
-        // `rng` if needed for blinding 
-        rng: Option<&mut dyn RngCore>,
-    ) -> Result<Self::Proof, Self::Error>
-        where
-            Self::Randomness: 'a,
-            Self::Commitment: 'a;
-
-    /// Multi point multi poly open, allowing the random oracle to be passed from
-    /// 'outside' to the function.
-    /// CAUTION: This is a low-level function to be handled carefully, typically
-    /// presuming that commitments and query_set is already bound to the internal
-    /// state of the Fiat-Shamir rng.
-    /// TODO: rename this function
-    fn batch_open_individual_opening_challenges<'a>(
-        ck: &Self::CommitterKey,
-        labeled_polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
-        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
-        query_set: &QuerySet<F>,
-        fs_rng: &mut Self::RandomOracle,
-        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
-        rng: Option<&mut dyn RngCore>,
-    ) -> Result<Self::BatchProof, Self::Error>
-        where
-            Self::Randomness: 'a,
-            Self::Commitment: 'a;
-
-    /// Single point multi poly verify, with random oracle passed from 'outside'.
-    /// CAUTION: This is a low-level function to be handled carefully, typically
-    /// presuming that commitments and query_set is already bound to the internal
-    /// state of the Fiat-Shamir rng.
-    /// TODO: rename this function
-    fn check_individual_opening_challenges<'a>(
-        vk: &Self::VerifierKey,
-        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
-        point: F,
-        values: impl IntoIterator<Item = F>,
-        proof: &Self::Proof,
-        fs_rng: &mut Self::RandomOracle,
-    ) -> Result<bool, Self::Error>
-        where
-            Self::Commitment: 'a;
-
-    /// Multi point multi poly verify, with random oracle passed from 'outside'.
-    /// CAUTION: This is a low-level function to be handled carefully, typically
-    /// presuming that commitments and query_set is already bound to the internal
-    /// state of the Fiat-Shamir rng.
-    /// TODO: rename this function
-    fn batch_check_individual_opening_challenges<'a>(
-        vk: &Self::VerifierKey,
-        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
-        query_set: &QuerySet<F>,
-        evaluations: &Evaluations<F>,
-        proof: &Self::BatchProof,
-        fs_rng: &mut Self::RandomOracle,
-    ) -> Result<bool, Self::Error>
-        where
-            Self::Commitment: 'a;
-
-    /// Default implementation of Multi point multi LC open, with random oracle passed from 'outside'.
-    /// Evaluates each of the (non-trivial) LC-polynomials at each of the query point the LC is queried.
-    /// CAUTION: This is a low-level function to be handled with carefully, presuming that
-    /// 1) the commitments
-    /// 2) their LC's, and
-    /// 3) the query set as well as the evaluations
-    /// are already bound to the internal state of the Fiat-Shamir rng.
-    // TODO: rename this function
-    fn open_combinations_individual_opening_challenges<'a>(
-        ck: &Self::CommitterKey,
-        linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
-        polynomials: impl IntoIterator<Item = &'a LabeledPolynomial<F>>,
-        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
-        query_set: &QuerySet<F>,
-        fs_rng: &mut Self::RandomOracle,
-        rands: impl IntoIterator<Item = &'a LabeledRandomness<Self::Randomness>>,
-        rng: Option<&mut dyn RngCore>,
-    ) -> Result<BatchLCProof<F, Self>, Self::Error>
-        where
-            Self::Randomness: 'a,
-            Self::Commitment: 'a,
-    {
-        let linear_combinations: Vec<_> = linear_combinations.into_iter().collect();
-        let polynomials: Vec<_> = polynomials.into_iter().collect();
-        let poly_query_set =
-            lc_query_set_to_poly_query_set(linear_combinations.iter().copied(), query_set);
-        let poly_evals = evaluate_query_set(polynomials.iter().copied(), &poly_query_set);
-        let proof = Self::batch_open_individual_opening_challenges(
-            ck,
-            polynomials,
-            commitments,
-            &poly_query_set,
-            fs_rng,
-            rands,
-            rng,
-        )?;
-        Ok(BatchLCProof {
-            proof,
-            evals: Some(poly_evals.values().copied().collect()),
-        })
-    }
-
-    /// Default implementation of Multi point multi LC verify, with random oracle passed from 'outside'.
-    /// Evaluates each of the (non-trivial) LC-polynomials at the query point.
-    /// CAUTION: This is a low-level function to be handled carefully, typically
-    /// presuming that commitments and query_set is already bound to the internal
-    /// state of the Fiat-Shamir rng.
-    /// TODO: rename this function
-    fn check_combinations_individual_opening_challenges<'a>(
-        vk: &Self::VerifierKey,
-        linear_combinations: impl IntoIterator<Item = &'a LinearCombination<F>>,
-        commitments: impl IntoIterator<Item = &'a LabeledCommitment<Self::Commitment>>,
-        eqn_query_set: &QuerySet<F>,
-        eqn_evaluations: &Evaluations<F>,
-        proof: &BatchLCProof<F, Self>,
-        fs_rng: &mut Self::RandomOracle,
-    ) -> Result<bool, Self::Error>
-        where
-            Self::Commitment: 'a,
-    {
-        let BatchLCProof { proof, evals } = proof;
-
-        let lc_s = BTreeMap::from_iter(linear_combinations.into_iter().map(|lc| (lc.label(), lc)));
-
-        let poly_query_set = lc_query_set_to_poly_query_set(lc_s.values().copied(), eqn_query_set);
-        let poly_evals = Evaluations::from_iter(
-            poly_query_set
-                .iter()
-                .map(|(_, point)| point)
-                .cloned()
-                .zip(evals.clone().unwrap()),
-        );
-
-        for &(ref lc_label, (_, point)) in eqn_query_set {
-            if let Some(lc) = lc_s.get(lc_label) {
-                let claimed_rhs = *eqn_evaluations.get(&(lc_label.clone(), point)).ok_or(
-                    Error::MissingEvaluation {
-                        label: lc_label.to_string(),
-                    },
-                )?;
-
-                let mut actual_rhs = F::zero();
-
-                for (coeff, label) in lc.iter() {
-                    let eval = match label {
-                        LCTerm::One => F::one(),
-                        LCTerm::PolyLabel(l) => *poly_evals
-                            .get(&(l.clone().into(), point))
-                            .ok_or(Error::MissingEvaluation { label: l.clone() })?,
-                    };
-
-                    actual_rhs += &(*coeff * eval);
-                }
-                if claimed_rhs != actual_rhs {
-                    eprintln!("Claimed evaluation of {} is incorrect", lc.label());
-                    return Ok(false);
-                }
-            }
-        }
-
-        let pc_result = Self::batch_check_individual_opening_challenges(
-            vk,
-            commitments,
-            &poly_query_set,
-            &poly_evals,
-            proof,
-            fs_rng,
-        )?;
-
-        if !pc_result {
-            eprintln!("Evaluation proofs failed to verify");
-            return Ok(false);
-        }
-
-        Ok(true)
+        // default implementation for verifying the Boneh multi-point eval proof.
+        // (our original implementation calls single_point_multi_poly_verify().
+        // But the real (and more efficient) Boneh method only calls again verify_lc
     }
 }
 
